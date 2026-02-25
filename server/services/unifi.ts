@@ -20,7 +20,10 @@ interface UnifiDevice {
   deviceType: string;
   version: string;
   latestAvailableVersion: string;
+  firmwareStatus: string;
 }
+
+const FORCED_UPDATE_MARKER = '__update_available__';
 
 interface AuthCandidate {
   label: string;
@@ -159,6 +162,39 @@ function extractDataArray(payload: any): any[] {
   return [];
 }
 
+function isGroupedHostRecord(raw: any): boolean {
+  return Array.isArray(raw?.devices);
+}
+
+function flattenGroupedDeviceRecords(records: any[]): any[] {
+  const flattened: any[] = [];
+
+  for (const record of records) {
+    if (!isGroupedHostRecord(record)) {
+      flattened.push(record);
+      continue;
+    }
+
+    const parentHostId = normalizeString(record?.hostId || record?.id || record?.uuid);
+    const parentHostName = normalizeString(record?.hostName || record?.name || record?.hostname);
+
+    for (const device of record.devices) {
+      if (!device || typeof device !== 'object') continue;
+      flattened.push({
+        ...device,
+        hostId: normalizeString(device?.hostId || parentHostId),
+        hostName: normalizeString(device?.hostName || parentHostName),
+      });
+    }
+  }
+
+  return flattened;
+}
+
+function extractGroupedHostRecords(records: any[]): any[] {
+  return records.filter(isGroupedHostRecord);
+}
+
 function extractNetworkControllerVersion(reportedState: any): { currentVersion: string; availableVersion: string } {
   const controllers = Array.isArray(reportedState?.controllers) ? reportedState.controllers : [];
 
@@ -196,6 +232,38 @@ function resolveNextUrl(baseUrl: string, payload: any): string {
     const parsed = new URL(baseUrl);
     parsed.searchParams.set('cursor', nextCursor);
     return parsed.toString();
+  }
+
+  return '';
+}
+
+function getRecordIdentifier(item: any, fallbackIndex?: number): string {
+  const preferredKeys = [
+    item?.id,
+    item?.deviceId,
+    item?.device_id,
+    item?.hostId,
+    item?.host_id,
+    item?.uuid,
+    item?.controllerUuid,
+    item?.controller_uuid,
+    item?.serial,
+    item?.mac,
+  ];
+
+  for (const key of preferredKeys) {
+    const normalized = normalizeString(key);
+    if (normalized) return normalized;
+  }
+
+  const name = normalizeString(item?.name || item?.hostname || item?.displayName);
+  const model = normalizeString(item?.model || item?.type || item?.deviceType || item?.category);
+  if (name || model) {
+    return `${name}::${model}`;
+  }
+
+  if (fallbackIndex !== undefined) {
+    return `idx:${fallbackIndex}`;
   }
 
   return '';
@@ -292,14 +360,15 @@ async function fetchPaginatedRecords(url: string, authCandidates: AuthCandidate[
     const payload = await response.json() as any;
     const items = extractDataArray(payload);
 
-    const signature = `${items.length}:${normalizeString(items[0]?.id)}:${normalizeString(items[items.length - 1]?.id)}`;
+    const signature = `${items.length}:${getRecordIdentifier(items[0])}:${getRecordIdentifier(items[items.length - 1])}`;
     if (page > 0 && signature === lastSignature) {
       break;
     }
     lastSignature = signature;
 
-    for (const item of items) {
-      const id = normalizeString(item?.id);
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      const id = getRecordIdentifier(item, index);
       if (id) {
         uniqueById.set(id, item);
       }
@@ -327,19 +396,23 @@ function parseHost(raw: any): UnifiHost {
   const reportedHardware = reported?.hardware || {};
   const firmwareUpdate = reported?.firmwareUpdate || raw?.firmwareUpdate || {};
   const networkController = extractNetworkControllerVersion(reported);
+  const nestedDevices = Array.isArray(raw?.devices) ? raw.devices : [];
+  const consoleDevice = nestedDevices.find((device: any) => !!device?.isConsole) || null;
 
   return {
-    id: normalizeString(raw?.id || raw?.hostId || raw?.host_id),
-    name: normalizeString(raw?.name || raw?.hostname || raw?.displayName || reported?.name),
+    id: normalizeString(raw?.id || raw?.hostId || raw?.host_id || raw?.uuid || raw?.controller_uuid || raw?.controllerUuid || raw?.serial || raw?.mac),
+    name: normalizeString(raw?.name || raw?.hostName || raw?.hostname || raw?.displayName || reported?.name),
     controllerUuid: normalizeString(reported?.controller_uuid || raw?.controller_uuid || raw?.controllerUuid),
     osCurrentVersion: normalizeString(
       reportedHardware?.firmwareVersion ||
       reported?.firmwareVersion ||
+      consoleDevice?.version ||
       raw?.firmwareVersion ||
       raw?.version
     ),
     osLatestVersion: normalizeString(
       firmwareUpdate?.latestAvailableVersion ||
+      consoleDevice?.updateAvailable ||
       reported?.latestAvailableVersion ||
       raw?.latestAvailableVersion
     ),
@@ -355,9 +428,9 @@ function parseDevice(raw: any): UnifiDevice {
   const firmwareUpdate = raw?.firmwareUpdate || {};
 
   return {
-    id: normalizeString(raw?.id || raw?.deviceId || raw?.device_id),
+    id: normalizeString(raw?.id || raw?.deviceId || raw?.device_id || raw?.uuid || raw?.serial || raw?.mac),
     name: normalizeString(raw?.name || raw?.hostname || raw?.displayName),
-    hostId: normalizeString(raw?.hostId || raw?.host_id || host?.id),
+    hostId: normalizeString(raw?.hostId || raw?.host_id || host?.id || raw?.parentHostId),
     controllerUuid: normalizeString(reported?.controller_uuid || raw?.controller_uuid || raw?.controllerUuid),
     deviceType: normalizeString(raw?.type || raw?.deviceType || raw?.category || raw?.model),
     version: normalizeString(
@@ -370,10 +443,12 @@ function parseDevice(raw: any): UnifiDevice {
     ),
     latestAvailableVersion: normalizeString(
       firmwareUpdate?.latestAvailableVersion ||
+      raw?.updateAvailable ||
       raw?.latestAvailableVersion ||
       raw?.availableFirmwareVersion ||
       reported?.latestAvailableVersion
     ),
+    firmwareStatus: normalizeString(raw?.firmwareStatus || reported?.firmwareStatus),
   };
 }
 
@@ -430,8 +505,39 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
     fetchPaginatedRecords(runtime.devicesApiUrl, authCandidates, 'devices'),
   ]);
 
-  const hosts = hostPayload.map(parseHost).filter(host => !!host.id && !!host.name);
-  const devices = devicePayload.map(parseDevice).filter(device => !!device.id);
+  const groupedHostsFromHostPayload = extractGroupedHostRecords(hostPayload);
+  const groupedHostsFromDevicePayload = extractGroupedHostRecords(devicePayload);
+
+  const hostCandidates = [
+    ...hostPayload,
+    ...groupedHostsFromDevicePayload,
+  ];
+
+  const flattenedDevices = flattenGroupedDeviceRecords(devicePayload);
+
+  const hostsById = new Map<string, UnifiHost>();
+  for (const hostRaw of hostCandidates) {
+    const parsedHost = parseHost(hostRaw);
+    if (!parsedHost.id || !parsedHost.name) continue;
+    if (!hostsById.has(parsedHost.id)) {
+      hostsById.set(parsedHost.id, parsedHost);
+      continue;
+    }
+
+    const existing = hostsById.get(parsedHost.id)!;
+    hostsById.set(parsedHost.id, {
+      ...existing,
+      name: existing.name || parsedHost.name,
+      controllerUuid: existing.controllerUuid || parsedHost.controllerUuid,
+      osCurrentVersion: existing.osCurrentVersion || parsedHost.osCurrentVersion,
+      osLatestVersion: existing.osLatestVersion || parsedHost.osLatestVersion,
+      networkCurrentVersion: existing.networkCurrentVersion || parsedHost.networkCurrentVersion,
+      networkLatestVersion: existing.networkLatestVersion || parsedHost.networkLatestVersion,
+    });
+  }
+
+  const hosts = Array.from(hostsById.values());
+  const devices = flattenedDevices.map(parseDevice).filter(device => !!device.id);
 
   const db = getDb();
   const customers = db.prepare('SELECT id, name FROM mock_customers').all() as Array<{ id: number; name: string }>;
@@ -489,6 +595,7 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
   let ambiguousHosts = 0;
   let insertedDevices = 0;
   const now = new Date().toISOString();
+  const insertedNetworkDeviceKeys = new Set<string>();
 
   const osLatestCandidates: string[] = [];
   const networkLatestCandidates: string[] = [];
@@ -571,7 +678,16 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
 
       for (const device of uniqueDevices.values()) {
         const version = device.version || 'unknown';
-        const targetVersion = device.latestAvailableVersion || version;
+        const firmwareStatus = device.firmwareStatus.toLowerCase();
+        const hasForcedUpdateFlag = firmwareStatus === 'updateavailable' || firmwareStatus === 'update-available' || firmwareStatus === 'update_available';
+        const targetVersion = device.latestAvailableVersion || (hasForcedUpdateFlag ? FORCED_UPDATE_MARKER : version);
+        const dedupeKey = `${customer.id}:${device.id}`;
+
+        if (insertedNetworkDeviceKeys.has(dedupeKey)) {
+          continue;
+        }
+
+        insertedNetworkDeviceKeys.add(dedupeKey);
         const deviceNumericId = Number(device.id);
 
         insertDevice.run(
@@ -584,7 +700,9 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
           Number.isFinite(deviceNumericId) ? deviceNumericId : null,
         );
         insertedDevices++;
-        networkLatestCandidates.push(targetVersion);
+        if (targetVersion !== FORCED_UPDATE_MARKER) {
+          networkLatestCandidates.push(targetVersion);
+        }
       }
     }
   });

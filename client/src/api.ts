@@ -19,7 +19,8 @@ async function throwApiError(res: Response, fallbackMessage: string): Promise<ne
     }
   }
 
-  throw new Error(message || fallbackMessage);
+  const statusSuffix = ` (HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''})`;
+  throw new Error(message || `${fallbackMessage}${statusSuffix}`);
 }
 
 export interface DeviceStatus {
@@ -235,12 +236,17 @@ export async function triggerUnifiSync(): Promise<{
   unmatchedHosts: number;
   ambiguousHosts: number;
 }> {
-  const res = await fetch(`${BASE}/admin/unifi/sync`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) return throwApiError(res, 'Failed to sync UniFi data');
-  return res.json();
+  try {
+    const res = await fetch(`${BASE}/admin/unifi/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) return throwApiError(res, 'Failed to sync UniFi data');
+    return res.json();
+  } catch (error) {
+    const message = (error as Error)?.message?.trim();
+    throw new Error(message || 'Failed to sync UniFi data (network error)');
+  }
 }
 
 export async function fetchUnifiMappings(): Promise<UnifiCustomerMapping[]> {

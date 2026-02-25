@@ -9,6 +9,8 @@ export interface ComparisonResult {
   status: UpdateStatus;
 }
 
+const FORCED_UPDATE_MARKER = '__update_available__';
+
 function normalizeVersion(version: string): string {
   // Remove leading 'v', trailing build metadata, handle formats like "7.2.1-69057"
   let v = version.replace(/^v/i, '').trim();
@@ -31,6 +33,10 @@ function normalizeVersion(version: string): string {
 }
 
 export function compareVersions(currentVersion: string, latestVersion: string, product: string): ComparisonResult {
+  if (latestVersion === FORCED_UPDATE_MARKER) {
+    return { product, currentVersion, latestVersion, status: 'update-available' };
+  }
+
   const current = normalizeVersion(currentVersion);
   const latest = normalizeVersion(latestVersion);
 
