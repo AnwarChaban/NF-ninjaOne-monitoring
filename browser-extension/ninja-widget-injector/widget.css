@@ -1,0 +1,170 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.widget-root {
+  padding: 10px;
+}
+
+.widget-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.meta-pill {
+  font-size: 11px;
+  color: #93c5fd;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.meta-time {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.content {
+  min-height: 80px;
+}
+
+.product-card {
+  background: #1e293b;
+  border-left: 4px solid #78350f;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.product-title {
+  margin: 0 0 8px;
+  color: #f1f5f9;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.status-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #78350f;
+  color: #fbbf24;
+  margin-bottom: 10px;
+}
+
+.product-meta {
+  font-size: 14px;
+  color: #94a3b8;
+  margin-bottom: 2px;
+}
+
+.product-meta a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.product-summary {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.customer-grid {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #334155;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 10px;
+}
+
+.customer-card {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.customer-title {
+  margin: 0 0 8px;
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.update-count {
+  color: #fbbf24;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 8px;
+  background: #1e293b;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.device-name {
+  color: #cbd5e1;
+  font-size: 15px;
+}
+
+.device-version {
+  color: #94a3b8;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.device-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #78350f;
+  color: #fbbf24;
+}
+
+.more-devices {
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.loading {
+  color: #94a3b8;
+  font-size: 14px;
+  padding: 8px 4px;
+}
+
+.error {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #7f1d1d;
+  background: #450a0a;
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.hidden {
+  display: none;
+}

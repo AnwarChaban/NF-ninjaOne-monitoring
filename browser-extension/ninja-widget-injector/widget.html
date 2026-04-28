@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Ninja Widget</title>
+    <link rel="stylesheet" href="widget.css" />
+  </head>
+  <body>
+    <div class="widget-root" id="widget-root">
+      <div class="widget-meta">
+        <span id="api-source" class="meta-pill">Quelle: localhost:3001</span>
+        <span id="last-sync" class="meta-time">warte auf Daten…</span>
+      </div>
+
+      <div id="content" class="content">
+        <div class="loading">Lade Daten…</div>
+      </div>
+
+      <div id="error-box" class="error hidden"></div>
+    </div>
+
+    <script src="widget.js"></script>
+  </body>
+  </html>
