@@ -255,14 +255,17 @@ function saveCustomersToDb(customers: Customer[]): void {
   const selectNinjaOneCustomer = db.prepare('SELECT id FROM ninjaone_customers WHERE ninja_org_id = ?');
   const deleteNinjaDevices = db.prepare('DELETE FROM ninjaone_devices WHERE ninjaone_customer_id = ?');
   const insertNinjaDevice = db.prepare(
-    `INSERT INTO ninjaone_devices (ninjaone_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at) 
+    `INSERT INTO ninjaone_devices (ninjaone_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  const upsertProduct = db.prepare(
+    'INSERT OR IGNORE INTO products (id, name, type, active, created_at) VALUES (?, ?, ?, 1, ?)'
   );
 
   const transaction = db.transaction(() => {
     for (const customer of customers) {
       const { id: customerId, orgId } = customerMap[customer.name];
-      
+
       if (!orgId) {
         console.warn(`[NinjaOne] Customer ${customer.name} has no orgId, skipping`);
         continue;
@@ -271,7 +274,7 @@ function saveCustomersToDb(customers: Customer[]): void {
       const ninjaOrgId = String(orgId);
       const ninjaOneRow = selectNinjaOneCustomer.get(ninjaOrgId) as any;
       let ninjaOneCustomerId: number;
-      
+
       if (ninjaOneRow) {
         ninjaOneCustomerId = ninjaOneRow.id;
       } else {
@@ -288,8 +291,9 @@ function saveCustomersToDb(customers: Customer[]): void {
       // Delete old ninja devices
       deleteNinjaDevices.run(ninjaOneCustomerId);
 
-      // Insert new devices
+      // Insert new devices — ensure product exists first to satisfy FK constraint
       for (const device of customer.devices) {
+        upsertProduct.run(device.product, device.product, 'scraped', now);
         insertNinjaDevice.run(
           ninjaOneCustomerId,
           device.product,

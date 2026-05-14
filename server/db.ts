@@ -122,6 +122,22 @@ function initDb() {
       FOREIGN KEY (sophos_customer_id) REFERENCES sophos_customers(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS unifi_customer_mappings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_text TEXT NOT NULL UNIQUE,
+      customer_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS unifi_unmatched_hosts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      host_id TEXT,
+      host_name TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      synced_at TEXT NOT NULL
+    );
   `);
 
   createIndexes();

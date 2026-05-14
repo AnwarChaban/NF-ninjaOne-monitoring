@@ -193,18 +193,18 @@ export default function CustomersPage() {
       setIsSyncingNinja(false);
     }
 
-    setIsSyncingUnifi(true);
-    try {
-      const unifiResult = await triggerUnifiSync();
-      setSyncMessage(
-        `UniFi synchronisiert: ${unifiResult.hosts} Hosts, ${unifiResult.devices} Geräte, ${unifiResult.unmatchedHosts} ohne Match, ${unifiResult.ambiguousHosts} mehrdeutig`
-      );
-    } catch (error) {
-      setSyncMessage((error as Error).message || 'UniFi-Sync fehlgeschlagen');
-    } finally {
-      setIsSyncingUnifi(false);
-      await load();
-    }
+    // setIsSyncingUnifi(true);
+    // try {
+    //   const unifiResult = await triggerUnifiSync();
+    //   setSyncMessage(
+    //     `UniFi synchronisiert: ${unifiResult.hosts} Hosts, ${unifiResult.devices} Geräte, ${unifiResult.unmatchedHosts} ohne Match, ${unifiResult.ambiguousHosts} mehrdeutig`
+    //   );
+    // } catch (error) {
+    //   setSyncMessage((error as Error).message || 'UniFi-Sync fehlgeschlagen');
+    // } finally {
+    //   setIsSyncingUnifi(false);
+    //   await load();
+    // }
   }
 
   useEffect(() => {

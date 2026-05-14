@@ -21,7 +21,7 @@ No test framework is configured yet.
 
 Full-stack TypeScript monorepo — Express backend + React/Vite frontend, single `package.json`.
 
-**Data flow:** Scrapers fetch latest versions from vendor websites → cached in SQLite → compared (semver) against customer device versions from NinjaOne API (or mock data) → served via REST API → rendered in React dashboard. A cron scheduler (`node-cron`) runs checks periodically and sends webhook/Slack notifications for available updates.
+**Data flow:** Scrapers fetch latest versions from vendor websites → stored in SQLite `product_versions` → compared (semver) against customer device versions from integration APIs (NinjaOne, UniFi, Sophos) → served via REST API → rendered in React dashboard. A cron scheduler (`node-cron`) runs checks periodically and sends webhook/Slack notifications.
 
 **Two TypeScript configs:** `tsconfig.json` (client, ESNext/bundler) and `tsconfig.server.json` (server, CommonJS output to `dist/`).
 
@@ -29,46 +29,70 @@ Full-stack TypeScript monorepo — Express backend + React/Vite frontend, single
 
 ### Backend (`server/`)
 
-- `index.ts` — Express setup, route mounting, cron scheduler, static file serving
-- `config.ts` — All env vars loaded here. `useNinjaOne` is derived (true when `NINJAONE_API_KEY` is set)
-- `db.ts` — SQLite via `better-sqlite3` with WAL mode. Tables: `version_cache`, `check_history`, `settings`. DB at `data/versions.db`
-- `routes/` — `GET /api/products`, `POST /api/check`, `GET|PUT /api/settings`
-- `services/version-fetcher.ts` — Orchestrates all scrapers, caches results, falls back to cached data on failure
-- `services/ninjaone.ts` — NinjaOne API client with automatic mock fallback when no API key is configured
+- `index.ts` — Express setup, route mounting, two cron jobs (version check + NinjaOne sync), initial sync on startup
+- `config.ts` — All env vars loaded here. `useNinjaOne` is derived from presence of API key or OAuth credentials
+- `db.ts` — SQLite via `better-sqlite3` with WAL mode and `foreign_keys = ON`. Seeds mock data on first run
+- `services/runtime-settings.ts` — Settings read from DB `settings` table first, falling back to env vars. Use this for NinjaOne/UniFi/webhook config at runtime (not just from `.env`)
+- `services/products.ts` — CRUD for products and version storage (`product_versions` table)
+- `services/customers.ts` — CRUD for customers and fetching devices across all integrations
+- `services/version-fetcher.ts` — Orchestrates scrapers; UniFi versions come from sync (not a scraper), so it reads cached `product_versions` for `unifi-*` products
+- `services/ninjaone.ts` — NinjaOne API client; syncs devices into `ninjaone_devices` table
+- `services/unifi.ts` — UniFi API client; fetches hosts/devices with paginated requests, matches hosts to customers by name (fuzzy + manual mappings in `unifi_customer_mappings`), syncs into `unifi_devices`
 - `services/comparator.ts` — Semver comparison with normalization for vendor-specific formats (Synology build numbers, Sophos MR suffixes)
 - `services/notifier.ts` — Console, webhook, and Slack notifications
-- `scrapers/` — One file per product (synology, sophos, unifi, proxmox-ve, proxmox-backup, teamviewer). Each exports a function returning `{ version, url }`
-- `mocks/ninjaone-data.ts` — 4 mock customers with 10 devices using deliberately outdated versions
+- `scrapers/` — One file per product (synology-dsm, sophos-firewall, proxmox-ve, proxmox-backup, teamviewer). Each exports `async function fetch<Name>Version(): Promise<{ version: string; url: string }>`. **UniFi has no scraper** — its version comes from the API sync.
+- `routes/admin.ts` — CRUD for products, customers, and integration accounts (NinjaOne/UniFi/Sophos), plus manual sync endpoints
 
-### Frontend (`client/`)
+### DB Schema (SQLite at `data/versions.db`)
+
+Core tables:
+- `customers` — top-level customer records
+- `products` — product registry (id, name, type: `scraped`|`custom`, active)
+- `product_versions` — version history per product and source (`scraped`, `ninjaone`, `unifi`, `sophos`)
+- `settings` — key/value store for runtime configuration (overrides env vars)
+
+Per-integration account + device tables (each integration has its own pair):
+- `ninjaone_customers` / `ninjaone_devices`
+- `unifi_customers` / `unifi_devices`
+- `sophos_customers` / `sophos_devices`
+
+UniFi-specific:
+- `unifi_customer_mappings` — manual host-name → customer mappings for UniFi sync
+- `unifi_unmatched_hosts` — hosts that couldn't be matched during sync
+
+### Frontend (`client/src/`)
 
 - React 18 SPA with inline styles (no CSS framework), German UI
-- `App.tsx` — Fetches products on mount, auto-refreshes every 60s. Grid layout (4-5 tiles per row)
-- `components/ProductCard.tsx` — Per-product tile with color-coded left border, click to expand/collapse customer details
-- `components/CustomerList.tsx` — Nested customer → device listing
-- `components/StatusBadge.tsx` — Status pills (green/orange/red/gray)
+- Hash-based routing: `#/admin` → AdminLayout, else → Dashboard
+- `App.tsx` — Dashboard: shows only products with pending updates, sorted by number of outdated devices. Merges `unifi-os` and `unifi-network` into a single "UniFi" card. Auto-refreshes every 60s.
+- `components/AdminLayout.tsx` — Admin shell with sub-pages for Products, Customers, Settings
 - `api.ts` — Typed fetch wrappers for all API endpoints
 
 ## Adding a New Product Scraper
 
 1. Create `server/scrapers/<product>.ts` exporting `async function fetch<Name>Version(): Promise<{ version: string; url: string }>`
 2. Register it in `server/services/version-fetcher.ts`: add to `scrapers` map and `productNames` map
-3. Add mock devices using the new product key in `server/mocks/ninjaone-data.ts`
+3. The product will be auto-seeded into the `products` table on first version fetch; or add it to `seedMockData()` in `db.ts` for mock data
+
+## Settings vs. Env Vars
+
+Integration credentials can be set either via `.env` (loaded at startup) **or** via the Admin → Settings UI (stored in `settings` table). The `runtime-settings.ts` functions always read DB first, falling back to config. This means credentials updated via UI take effect immediately without restart.
 
 ## Environment Variables
 
 Configured in `.env` (see `.env.example`). All loaded via `server/config.ts`.
 
 - `NINJAONE_API_URL` — NinjaOne API base URL (default: `https://eu.ninjarmm.com`)
-- `NINJAONE_CLIENT_ID` / `NINJAONE_CLIENT_SECRET` / `NINJAONE_API_KEY` — NinjaOne credentials. If `NINJAONE_API_KEY` is unset, app uses mock data automatically
+- `NINJAONE_CLIENT_ID` / `NINJAONE_CLIENT_SECRET` / `NINJAONE_API_KEY` — NinjaOne credentials
+- `NINJA_SYNC_CRON` — Cron for NinjaOne sync (default: `0 2 * * *`)
+- `UNIFI_API_KEY` / `UNIFI_CLIENT_ID` / `UNIFI_CLIENT_SECRET` — UniFi API credentials (endpoint is hardcoded to `api.ui.com/v1`)
 - `PORT` — Server port (default: `3001`)
-- `CHECK_CRON` — Cron expression for scheduled checks (default: `0 */4 * * *`)
-- `WEBHOOK_URL` — Generic webhook for update notifications
-- `SLACK_WEBHOOK_URL` — Slack webhook for update notifications
+- `CHECK_CRON` — Cron for scraper version checks (default: `0 */4 * * *`)
+- `WEBHOOK_URL` / `SLACK_WEBHOOK_URL` — Notification targets
 
 ## Key Types
 
 - `UpdateStatus`: `'up-to-date' | 'update-available' | 'major-update' | 'unknown'`
-- `VersionInfo`: product + latestVersion + releaseUrl + checkedAt
-- `ProductStatus`: full product state with nested customers/devices for the API response
-- `UpdateNotification`: used across comparator → notifier pipeline
+- `ProductStatus` (routes/products.ts): full product state with nested customers/devices for the dashboard API
+- `VersionInfo` (services/version-fetcher.ts): product + latestVersion + releaseUrl + checkedAt
+- `UpdateNotification` (services/notifier.ts): used across comparator → notifier pipeline
