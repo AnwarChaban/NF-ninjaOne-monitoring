@@ -229,31 +229,75 @@ async function fetchOrganizationDevices(apiUrl: string, orgId: number, authoriza
 
 function saveCustomersToDb(customers: Customer[]): void {
   const db = getDb();
+  const now = new Date().toISOString();
 
-  const upsertCustomer = db.prepare(
-    `INSERT INTO mock_customers (id, name) VALUES (?, ?)
-     ON CONFLICT(id) DO UPDATE SET name = excluded.name`
+  // Get or create base customers BEFORE transaction
+  const selectCustomer = db.prepare('SELECT id FROM customers WHERE name = ?');
+  const insertCustomer = db.prepare('INSERT INTO customers (name, created_at, updated_at) VALUES (?, ?, ?)');
+  
+  // Build map of customer IDs first
+  const customerMap: Record<string, { id: number; orgId?: number }> = {};
+  for (const customer of customers) {
+    let customerId = (selectCustomer.get(customer.name) as any)?.id;
+    if (!customerId) {
+      const result = insertCustomer.run(customer.name, now, now);
+      customerId = result.lastInsertRowid as number;
+    }
+    customerMap[customer.name] = { id: customerId, orgId: customer.devices[0]?.orgId };
+  }
+
+  // NinjaOne operations INSIDE transaction
+  const upsertNinjaOneCustomer = db.prepare(
+    `INSERT INTO ninjaone_customers (customer_id, ninja_org_id, name, created_at, updated_at) 
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(ninja_org_id) DO UPDATE SET customer_id = excluded.customer_id, updated_at = excluded.updated_at`
   );
-  const deleteNinjaDevicesForCustomer = db.prepare(
-    "DELETE FROM mock_devices WHERE customer_id = ? AND (source = 'ninja' OR (source = 'manual' AND ninja_device_id IS NOT NULL))"
-  );
-  const insertDevice = db.prepare(
-    "INSERT INTO mock_devices (customer_id, name, product, current_version, latest_version, source, org_id, ninja_device_id) VALUES (?, ?, ?, ?, NULL, 'ninja', ?, ?)"
+  const selectNinjaOneCustomer = db.prepare('SELECT id FROM ninjaone_customers WHERE ninja_org_id = ?');
+  const deleteNinjaDevices = db.prepare('DELETE FROM ninjaone_devices WHERE ninjaone_customer_id = ?');
+  const insertNinjaDevice = db.prepare(
+    `INSERT INTO ninjaone_devices (ninjaone_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at) 
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
 
   const transaction = db.transaction(() => {
     for (const customer of customers) {
-      upsertCustomer.run(customer.id, customer.name);
-      deleteNinjaDevicesForCustomer.run(customer.id);
+      const { id: customerId, orgId } = customerMap[customer.name];
+      
+      if (!orgId) {
+        console.warn(`[NinjaOne] Customer ${customer.name} has no orgId, skipping`);
+        continue;
+      }
 
+      const ninjaOrgId = String(orgId);
+      const ninjaOneRow = selectNinjaOneCustomer.get(ninjaOrgId) as any;
+      let ninjaOneCustomerId: number;
+      
+      if (ninjaOneRow) {
+        ninjaOneCustomerId = ninjaOneRow.id;
+      } else {
+        const result = upsertNinjaOneCustomer.run(
+          customerId,
+          ninjaOrgId,
+          `NinjaOne ${customer.name}`,
+          now,
+          now
+        );
+        ninjaOneCustomerId = result.lastInsertRowid as number;
+      }
+
+      // Delete old ninja devices
+      deleteNinjaDevices.run(ninjaOneCustomerId);
+
+      // Insert new devices
       for (const device of customer.devices) {
-        insertDevice.run(
-          customer.id,
-          device.name,
+        insertNinjaDevice.run(
+          ninjaOneCustomerId,
           device.product,
+          `ninja-${device.ninjaDeviceId || 'unknown'}`,
+          device.name,
           device.currentVersion,
-          device.orgId ?? null,
-          device.ninjaDeviceId ?? null,
+          now,
+          now
         );
       }
     }
@@ -446,7 +490,7 @@ export async function syncNinjaOneData(): Promise<{ customers: number; devices: 
 
 export async function getCustomers(): Promise<Customer[]> {
   if (isNinjaOneConfigured()) {
-    return getMockData();
+    return await fetchFromNinjaOne();
   }
   console.log('[NinjaOne] No API key configured, using mock data');
   return getMockData();

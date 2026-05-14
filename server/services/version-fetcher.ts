@@ -1,4 +1,5 @@
 import { getDb } from '../db';
+import { getAllProducts, getLatestVersion, storeProductVersion, type Product } from './products';
 import { fetchSynologyVersion } from '../scrapers/synology';
 import { fetchSophosVersion } from '../scrapers/sophos';
 import { fetchProxmoxVEVersion } from '../scrapers/proxmox-ve';
@@ -32,23 +33,29 @@ export const productNames: Record<string, string> = {
 };
 
 export function getProductName(id: string): string {
-  // Check scraper product names first
   if (productNames[id]) return productNames[id];
-  // Check custom products
-  const db = getDb();
-  const custom = db.prepare('SELECT name FROM custom_products WHERE id = ?').get(id) as { name: string } | undefined;
-  return custom?.name || id;
+  return id;
 }
 
 export async function fetchLatestVersion(product: string): Promise<VersionInfo> {
+  // Special handling for Unifi (comes from API, not scraper)
   if (product === 'unifi-network' || product === 'unifi-os') {
     const db = getDb();
-    const cached = db.prepare('SELECT * FROM version_cache WHERE product = ?').get(product) as any;
+    const cached = db
+      .prepare(`
+        SELECT version, release_url, checked_at
+        FROM product_versions
+        WHERE product_id = ? AND source = 'unifi'
+        ORDER BY checked_at DESC
+        LIMIT 1
+      `)
+      .get(product) as any;
+
     if (cached) {
       return {
         product,
-        latestVersion: cached.latest_version,
-        releaseUrl: cached.release_url,
+        latestVersion: cached.version,
+        releaseUrl: cached.release_url || '',
         checkedAt: cached.checked_at,
       };
     }
@@ -64,17 +71,6 @@ export async function fetchLatestVersion(product: string): Promise<VersionInfo> 
 
   const scraper = scrapers[product];
   if (!scraper) {
-    // Check if it's a custom product
-    const db = getDb();
-    const custom = db.prepare('SELECT * FROM custom_products WHERE id = ? AND active = 1').get(product) as any;
-    if (custom) {
-      return {
-        product,
-        latestVersion: custom.latest_version,
-        releaseUrl: custom.release_url || '',
-        checkedAt: custom.updated_at,
-      };
-    }
     return {
       product,
       latestVersion: '',
@@ -88,29 +84,19 @@ export async function fetchLatestVersion(product: string): Promise<VersionInfo> 
     const { version, url } = await scraper();
     const checkedAt = new Date().toISOString();
 
-    // Cache in DB
-    const db = getDb();
-    db.prepare(`
-      INSERT OR REPLACE INTO version_cache (product, latest_version, release_url, checked_at)
-      VALUES (?, ?, ?, ?)
-    `).run(product, version, url, checkedAt);
-
-    db.prepare(`
-      INSERT INTO check_history (product, version, checked_at)
-      VALUES (?, ?, ?)
-    `).run(product, version, checkedAt);
+    // Store in new schema
+    storeProductVersion(product, version, 'scraped', url);
 
     return { product, latestVersion: version, releaseUrl: url, checkedAt };
   } catch (error) {
     // Try returning cached version
-    const db = getDb();
-    const cached = db.prepare('SELECT * FROM version_cache WHERE product = ?').get(product) as any;
-    if (cached) {
+    const latest = getLatestVersion(product);
+    if (latest) {
       return {
         product,
-        latestVersion: cached.latest_version,
-        releaseUrl: cached.release_url,
-        checkedAt: cached.checked_at,
+        latestVersion: latest.version,
+        releaseUrl: latest.releaseUrl || '',
+        checkedAt: latest.checkedAt,
         error: `Fetch failed, using cached data: ${(error as Error).message}`,
       };
     }
@@ -127,14 +113,14 @@ export async function fetchLatestVersion(product: string): Promise<VersionInfo> 
 export async function fetchAllLatestVersions(): Promise<VersionInfo[]> {
   const allProducts = getAllProducts();
   const results = await Promise.allSettled(
-    allProducts.map(product => fetchLatestVersion(product))
+    allProducts.map(product => fetchLatestVersion(product.id))
   );
 
   return results.map((result, i) => {
     if (result.status === 'fulfilled') return result.value;
     const product = allProducts[i];
     return {
-      product,
+      product: product.id,
       latestVersion: '',
       releaseUrl: '',
       checkedAt: new Date().toISOString(),
@@ -144,41 +130,25 @@ export async function fetchAllLatestVersions(): Promise<VersionInfo[]> {
 }
 
 export function getCachedVersions(): VersionInfo[] {
-  const db = getDb();
+  const allProducts = getAllProducts();
 
-  // Get scraper cached versions
-  const rows = db.prepare('SELECT * FROM version_cache').all() as any[];
-  const scraperVersions = rows.map(row => ({
-    product: row.product,
-    latestVersion: row.latest_version,
-    releaseUrl: row.release_url,
-    checkedAt: row.checked_at,
-  }));
+  return allProducts.map(product => {
+    const latest = getLatestVersion(product.id);
 
-  // Get active custom product versions
-  const customRows = db.prepare('SELECT * FROM custom_products WHERE active = 1').all() as any[];
-  const customVersions = customRows.map(row => ({
-    product: row.id,
-    latestVersion: row.latest_version,
-    releaseUrl: row.release_url || '',
-    checkedAt: row.updated_at,
-  }));
+    if (latest) {
+      return {
+        product: product.id,
+        latestVersion: latest.version,
+        releaseUrl: latest.releaseUrl || '',
+        checkedAt: latest.checkedAt,
+      };
+    }
 
-  return [...scraperVersions, ...customVersions];
-}
-
-export function getAllProducts(): string[] {
-  const db = getDb();
-
-  // Active scraper products
-  const activeScrapers = db.prepare('SELECT product FROM scraper_products WHERE active = 1').all() as { product: string }[];
-  const scraperIds = activeScrapers
-    .map(r => r.product)
-    .filter(p => scrapers[p] || p === 'unifi-network' || p === 'unifi-os');
-
-  // Active custom products
-  const activeCustom = db.prepare('SELECT id FROM custom_products WHERE active = 1').all() as { id: string }[];
-  const customIds = activeCustom.map(r => r.id);
-
-  return [...scraperIds, ...customIds];
+    return {
+      product: product.id,
+      latestVersion: '',
+      releaseUrl: '',
+      checkedAt: new Date().toISOString(),
+    };
+  });
 }

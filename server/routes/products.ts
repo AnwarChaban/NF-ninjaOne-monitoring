@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { getAllProducts, getCachedVersions, getProductName, type VersionInfo } from '../services/version-fetcher';
-import { getCustomers } from '../services/ninjaone';
+import { getAllProducts, getLatestVersion } from '../services/products';
 import { compareVersions, type ComparisonResult } from '../services/comparator';
+import { getAllDevicesByProduct } from '../services/customers';
 
 const router = Router();
 
@@ -21,62 +21,52 @@ export interface ProductStatus {
       currentVersion: string;
       latestVersion?: string;
       status: ComparisonResult['status'];
-      orgId?: number;
-      ninjaDeviceId?: number;
     }>;
   }>;
 }
 
 router.get('/products', async (_req, res) => {
   try {
-    const [cachedVersions, customers] = await Promise.all([
-      getCachedVersions(),
-      getCustomers(),
-    ]);
+    const products = getAllProducts();
+    const devicesByProduct = getAllDevicesByProduct();
 
-    const versionMap = new Map<string, VersionInfo>();
-    for (const v of cachedVersions) {
-      versionMap.set(v.product, v);
-    }
+    const result: ProductStatus[] = products.map(product => {
+      const latest = getLatestVersion(product.id);
+      const latestVersion = latest?.version || '';
 
-    const allProducts = getAllProducts();
-    const result: ProductStatus[] = allProducts.map(product => {
-      const cached = versionMap.get(product);
-      const latestVersion = cached?.latestVersion || '';
+      // Group devices by customer
+      const productDevices = devicesByProduct[product.id] || [];
+      const customerMap = new Map<number, { id: number; name: string; devices: any[] }>();
 
-      const productCustomers = customers
-        .map(customer => {
-          const devices = (customer.devices || [])
-            .filter(d => d.product === product)
-            .map(d => {
-              const effectiveLatestVersion = d.latestVersion || latestVersion;
-              const comparison = effectiveLatestVersion
-                ? compareVersions(d.currentVersion, effectiveLatestVersion, product)
-                : { status: 'unknown' as const };
-              return {
-                id: d.id,
-                name: d.name,
-                currentVersion: d.currentVersion,
-                latestVersion: d.latestVersion,
-                status: comparison.status,
-                orgId: d.orgId,
-                ninjaDeviceId: d.ninjaDeviceId,
-              };
-            });
+      for (const device of productDevices) {
+        if (!customerMap.has(device.customerId)) {
+          customerMap.set(device.customerId, {
+            id: device.customerId,
+            name: device.customerName,
+            devices: [],
+          });
+        }
 
-          if (devices.length === 0) return null;
-          return { id: customer.id, name: customer.name, devices };
-        })
-        .filter((c): c is NonNullable<typeof c> => c !== null);
+        const comparison = latestVersion
+          ? compareVersions(device.currentVersion, latestVersion, product.id)
+          : { status: 'unknown' as const };
+
+        customerMap.get(device.customerId)!.devices.push({
+          id: device.id,
+          name: device.customerName,
+          currentVersion: device.currentVersion,
+          latestVersion: latestVersion || undefined,
+          status: comparison.status,
+        });
+      }
 
       return {
-        product,
-        productName: getProductName(product),
+        product: product.id,
+        productName: product.name,
         latestVersion,
-        releaseUrl: cached?.releaseUrl || '',
-        checkedAt: cached?.checkedAt || '',
-        error: cached?.error,
-        customers: productCustomers,
+        releaseUrl: latest?.releaseUrl || '',
+        checkedAt: latest?.checkedAt || '',
+        customers: Array.from(customerMap.values()),
       };
     });
 

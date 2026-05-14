@@ -9,10 +9,11 @@ import checksRouter from './routes/checks';
 import settingsRouter from './routes/settings';
 import adminRouter from './routes/admin';
 import { fetchAllLatestVersions } from './services/version-fetcher';
-import { getCustomers, syncNinjaOneData } from './services/ninjaone';
 import { compareVersions } from './services/comparator';
 import { sendNotifications, type UpdateNotification } from './services/notifier';
 import { isNinjaOneConfigured } from './services/runtime-settings';
+import { getAllDevicesByProduct } from './services/customers';
+import { syncNinjaOneData } from './services/ninjaone';
 
 const app = express();
 
@@ -40,18 +41,17 @@ async function runScheduledCheck() {
   console.log(`[Scheduler] Running version check at ${new Date().toISOString()}`);
   try {
     const versions = await fetchAllLatestVersions();
-    const customers = await getCustomers();
+    const devicesByProduct = getAllDevicesByProduct();
 
     const updates: UpdateNotification[] = [];
 
     for (const version of versions) {
       if (!version.latestVersion) continue;
-      for (const customer of customers) {
-        for (const device of customer.devices) {
-          if (device.product !== version.product) continue;
-          const comparison = compareVersions(device.currentVersion, version.latestVersion, device.product);
-          updates.push({ ...comparison, customer: customer.name, device: device.name });
-        }
+      
+      const devices = devicesByProduct[version.product] || [];
+      for (const device of devices) {
+        const comparison = compareVersions(device.currentVersion, version.latestVersion, version.product);
+        updates.push({ ...comparison, customer: device.customerName, device: `${device.source}-device` });
       }
     }
 
