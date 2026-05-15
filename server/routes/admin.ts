@@ -37,15 +37,22 @@ router.get('/admin/scraper-products', (_req, res) => {
     .prepare("SELECT id, name, active FROM products WHERE type = 'scraped' ORDER BY name")
     .all() as Array<{ id: string; name: string; active: number }>;
 
-  res.json(products.map(p => ({
-    product: p.id,
-    name: productNames[p.id] || p.name,
-    active: p.active === 1,
-  })));
+  res.json(products.map(p => {
+    const latest = getLatestVersion(p.id);
+    return {
+      product: p.id,
+      name: productNames[p.id] || p.name,
+      active: p.active === 1,
+      latestVersion: latest?.version || '',
+      releaseUrl: latest?.releaseUrl || '',
+    };
+  }));
 });
 
 router.put('/admin/scraper-products/:id', (req, res) => {
-  const { active } = req.body as { active?: boolean };
+  const { active, name, latestVersion, releaseUrl } = req.body as {
+    active?: boolean; name?: string; latestVersion?: string; releaseUrl?: string;
+  };
   const existing = getProduct(req.params.id);
 
   if (!existing) {
@@ -53,7 +60,15 @@ router.put('/admin/scraper-products/:id', (req, res) => {
     return;
   }
 
-  updateProduct(req.params.id, { active: active ? 1 : 0 });
+  updateProduct(req.params.id, {
+    ...(active !== undefined && { active: active ? 1 : 0 }),
+    ...(name !== undefined && { name }),
+  });
+
+  if (latestVersion) {
+    storeProductVersion(req.params.id, latestVersion, 'scraped', releaseUrl);
+  }
+
   res.json({ ok: true });
 });
 
@@ -173,6 +188,12 @@ router.post('/admin/products', (req, res) => {
   }
 
   createProduct(id, name, type || 'custom');
+  res.json({ ok: true });
+});
+
+router.delete('/admin/products/:id', (req, res) => {
+  const db = getDb();
+  db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 

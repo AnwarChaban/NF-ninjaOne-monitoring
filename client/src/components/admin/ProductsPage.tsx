@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  fetchScraperProducts, updateScraperProduct,
+  fetchScraperProducts, updateScraperProduct, deleteScraperProduct,
   fetchCustomProducts, createCustomProduct, updateCustomProduct, deleteCustomProduct,
   type ScraperProduct, type CustomProduct,
 } from '../../api';
@@ -24,6 +24,8 @@ export default function ProductsPage() {
   const [form, setForm] = useState({ id: '', name: '', latestVersion: '', releaseUrl: '' });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ name: '', latestVersion: '', releaseUrl: '' });
+  const [editingScraperId, setEditingScraperId] = useState<string | null>(null);
+  const [editScraperForm, setEditScraperForm] = useState({ name: '', latestVersion: '', releaseUrl: '' });
 
   async function load() {
     const [s, c] = await Promise.all([fetchScraperProducts(), fetchCustomProducts()]);
@@ -35,6 +37,23 @@ export default function ProductsPage() {
 
   async function handleToggleScraper(product: string, active: boolean) {
     await updateScraperProduct(product, active);
+    load();
+  }
+
+  async function handleUpdateScraper(product: string) {
+    if (!editScraperForm.name.trim()) return;
+    await updateScraperProduct(product, {
+      name: editScraperForm.name.trim(),
+      latestVersion: editScraperForm.latestVersion.trim() || undefined,
+      releaseUrl: editScraperForm.releaseUrl.trim() || undefined,
+    });
+    setEditingScraperId(null);
+    load();
+  }
+
+  async function handleDeleteScraper(product: string) {
+    if (!confirm(`Produkt "${product}" löschen? Alle zugehörigen Gerätedaten werden ebenfalls gelöscht.`)) return;
+    await deleteScraperProduct(product);
     load();
   }
 
@@ -70,31 +89,86 @@ export default function ProductsPage() {
         {scrapers.map(s => (
           <div key={s.product} style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '12px 0', borderBottom: '1px solid #334155',
+            padding: '12px 0', borderBottom: '1px solid #334155', gap: '12px',
           }}>
-            <div>
-              <span style={{ color: '#f1f5f9', fontSize: '14px', fontWeight: 500 }}>{s.name}</span>
-              <span style={{ color: '#64748b', fontSize: '12px', marginLeft: '8px' }}>({s.product})</span>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <span style={{ color: s.active ? '#6ee7b7' : '#64748b', fontSize: '13px' }}>
-                {s.active ? 'Aktiv' : 'Inaktiv'}
-              </span>
-              <div
-                onClick={() => handleToggleScraper(s.product, !s.active)}
-                style={{
-                  width: '44px', height: '24px', borderRadius: '12px',
-                  backgroundColor: s.active ? '#065f46' : '#374151',
-                  position: 'relative', transition: 'background-color 0.2s', cursor: 'pointer',
-                }}
-              >
-                <div style={{
-                  width: '18px', height: '18px', borderRadius: '50%',
-                  backgroundColor: '#fff', position: 'absolute', top: '3px',
-                  left: s.active ? '23px' : '3px', transition: 'left 0.2s',
-                }} />
+            {/* Name / Edit */}
+            {editingScraperId === s.product ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '11px', marginBottom: '3px' }}>Name</div>
+                  <input
+                    style={{ ...inputStyle, width: '180px' }}
+                    value={editScraperForm.name}
+                    onChange={e => setEditScraperForm(f => ({ ...f, name: e.target.value }))}
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '11px', marginBottom: '3px' }}>Version</div>
+                  <input
+                    style={{ ...inputStyle, width: '120px' }}
+                    placeholder={s.latestVersion || 'z.B. 1.0.0'}
+                    value={editScraperForm.latestVersion}
+                    onChange={e => setEditScraperForm(f => ({ ...f, latestVersion: e.target.value }))}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: '200px' }}>
+                  <div style={{ color: '#64748b', fontSize: '11px', marginBottom: '3px' }}>Release-URL</div>
+                  <input
+                    style={{ ...inputStyle, width: '100%' }}
+                    placeholder={s.releaseUrl || 'https://...'}
+                    value={editScraperForm.releaseUrl}
+                    onChange={e => setEditScraperForm(f => ({ ...f, releaseUrl: e.target.value }))}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignSelf: 'flex-end' }}>
+                  <button style={{ ...primaryBtn, padding: '6px 12px', fontSize: '12px' }} onClick={() => handleUpdateScraper(s.product)}>Speichern</button>
+                  <button style={{ ...ghostBtn, padding: '6px 10px', fontSize: '12px' }} onClick={() => setEditingScraperId(null)}>✕</button>
+                </div>
               </div>
-            </label>
+            ) : (
+              <div>
+                <span style={{ color: '#f1f5f9', fontSize: '14px', fontWeight: 500 }}>{s.name}</span>
+                <span style={{ color: '#64748b', fontSize: '12px', marginLeft: '8px' }}>({s.product})</span>
+              </div>
+            )}
+
+            {/* Actions */}
+            {editingScraperId !== s.product && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                  <span style={{ color: s.active ? '#6ee7b7' : '#64748b', fontSize: '13px' }}>
+                    {s.active ? 'Aktiv' : 'Inaktiv'}
+                  </span>
+                  <div
+                    onClick={() => handleToggleScraper(s.product, !s.active)}
+                    style={{
+                      width: '44px', height: '24px', borderRadius: '12px',
+                      backgroundColor: s.active ? '#065f46' : '#374151',
+                      position: 'relative', transition: 'background-color 0.2s', cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{
+                      width: '18px', height: '18px', borderRadius: '50%',
+                      backgroundColor: '#fff', position: 'absolute', top: '3px',
+                      left: s.active ? '23px' : '3px', transition: 'left 0.2s',
+                    }} />
+                  </div>
+                </label>
+                <button
+                  style={{ ...ghostBtn, padding: '4px 10px', fontSize: '12px' }}
+                  onClick={() => { setEditingScraperId(s.product); setEditScraperForm({ name: s.name, latestVersion: s.latestVersion, releaseUrl: s.releaseUrl }); }}
+                >
+                  Bearbeiten
+                </button>
+                <button
+                  style={{ ...dangerBtn, padding: '4px 10px', fontSize: '12px' }}
+                  onClick={() => handleDeleteScraper(s.product)}
+                >
+                  Löschen
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -1,4 +1,3 @@
-import React from 'react';
 
 type View = 'versions' | 'backup';
 
@@ -20,7 +19,9 @@ export default function Sidebar({ activeView }: SidebarProps) {
       display: 'flex',
       flexDirection: 'column',
       flexShrink: 0,
-      minHeight: '100vh',
+      height: '100vh',
+      position: 'sticky',
+      top: 0,
     }}>
       <div style={{ padding: '24px 20px 20px' }}>
         <div style={{ fontSize: '16px', fontWeight: 800, color: '#f1f5f9' }}>Net Factory</div>

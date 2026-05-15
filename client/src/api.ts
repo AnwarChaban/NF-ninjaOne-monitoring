@@ -78,6 +78,8 @@ export interface ScraperProduct {
   product: string;
   name: string;
   active: boolean;
+  latestVersion: string;
+  releaseUrl: string;
 }
 
 export interface CustomProduct {
@@ -129,11 +131,17 @@ export async function fetchScraperProducts(): Promise<ScraperProduct[]> {
   return res.json();
 }
 
-export async function updateScraperProduct(id: string, active: boolean): Promise<void> {
+export async function deleteScraperProduct(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/admin/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete product');
+}
+
+export async function updateScraperProduct(id: string, data: boolean | { active?: boolean; name?: string; latestVersion?: string; releaseUrl?: string }): Promise<void> {
+  const payload = typeof data === 'boolean' ? { active: data } : data;
   const res = await fetch(`${BASE}/admin/scraper-products/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ active }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error('Failed to update scraper product');
 }

@@ -208,9 +208,9 @@ export default function App() {
   if (isAdmin) return <AdminLayout />;
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar activeView={isBackup ? 'backup' : 'versions'} />
-      <main style={{ flex: 1, overflow: 'auto' }}>
+      <main style={{ flex: 1, overflowY: 'auto' }}>
         {isBackup ? <BackupDashboard /> : <Dashboard />}
       </main>
     </div>

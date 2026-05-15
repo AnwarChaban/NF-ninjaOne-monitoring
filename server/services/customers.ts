@@ -129,8 +129,8 @@ export function getAllDevicesByProduct() {
 
   const ninjaOneRows = db
     .prepare(`
-      SELECT 
-        nd.id, nd.product_id as productId, nd.current_version as currentVersion,
+      SELECT
+        nd.id, nd.name as deviceName, nd.product_id as productId, nd.current_version as currentVersion,
         nc.customer_id as customerId, c.name as customerName,
         'ninjaone' as source
       FROM ninjaone_devices nd
@@ -141,8 +141,8 @@ export function getAllDevicesByProduct() {
 
   const unifiRows = db
     .prepare(`
-      SELECT 
-        ud.id, ud.product_id as productId, ud.current_version as currentVersion,
+      SELECT
+        ud.id, ud.name as deviceName, ud.product_id as productId, ud.current_version as currentVersion,
         uc.customer_id as customerId, c.name as customerName,
         'unifi' as source
       FROM unifi_devices ud
@@ -153,8 +153,8 @@ export function getAllDevicesByProduct() {
 
   const sophosRows = db
     .prepare(`
-      SELECT 
-        sd.id, sd.product_id as productId, sd.current_version as currentVersion,
+      SELECT
+        sd.id, sd.name as deviceName, sd.product_id as productId, sd.current_version as currentVersion,
         sc.customer_id as customerId, c.name as customerName,
         'sophos' as source
       FROM sophos_devices sd
