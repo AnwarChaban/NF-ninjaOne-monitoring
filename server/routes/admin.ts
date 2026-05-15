@@ -8,7 +8,7 @@ import {
   storeProductVersion,
 } from '../services/products';
 import { isNinjaOneConfigured, isUnifiConfigured } from '../services/runtime-settings';
-import { syncNinjaOneData } from '../services/ninjaone';
+import { syncNinjaOneData, fetchNinjaOneBackups } from '../services/ninjaone';
 import { syncUnifiData } from '../services/unifi';
 import { productNames } from '../services/version-fetcher';
 
@@ -633,6 +633,17 @@ router.get('/admin/unifi/unmatched-hosts', (_req, res) => {
     ORDER BY host_name
   `).all();
   res.json(hosts);
+});
+
+// --- NinjaOne Backups ---
+
+router.get('/admin/ninjaone/backups', async (_req, res) => {
+  try {
+    const backups = await fetchNinjaOneBackups();
+    res.json(backups);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 export default router;

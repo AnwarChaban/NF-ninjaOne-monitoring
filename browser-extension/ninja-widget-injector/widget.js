@@ -208,14 +208,15 @@ function render(products) {
     )
   );
 
-  const target = withUpdates.length > 0 ? withUpdates[0] : products[0];
-  if (!target) {
-    elements.content.innerHTML = '<div class="loading">Keine Daten vorhanden.</div>';
+  if (withUpdates.length === 0) {
+    elements.content.innerHTML = '<div class="loading">Alle Geräte sind aktuell.</div>';
     sendHeight();
     return;
   }
 
-  elements.content.appendChild(renderProduct(target));
+  for (const product of withUpdates) {
+    elements.content.appendChild(renderProduct(product));
+  }
   sendHeight();
 }
 

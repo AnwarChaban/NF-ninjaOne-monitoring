@@ -10,7 +10,7 @@ body {
 }
 
 .widget-root {
-  padding: 10px;
+  padding: 8px;
 }
 
 .widget-meta {
@@ -42,33 +42,34 @@ body {
 
 .product-card {
   background: #1e293b;
-  border-left: 4px solid #78350f;
-  border-radius: 12px;
-  padding: 16px;
+  border-left: 3px solid #78350f;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
 }
 
 .product-title {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   color: #f1f5f9;
-  font-size: 24px;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .status-pill {
   display: inline-block;
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
   font-weight: 700;
   background: #78350f;
   color: #fbbf24;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .product-meta {
-  font-size: 14px;
+  font-size: 12px;
   color: #94a3b8;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .product-meta a {
@@ -77,76 +78,77 @@ body {
 }
 
 .product-summary {
-  margin-top: 6px;
+  margin-top: 3px;
   color: #64748b;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .customer-grid {
-  margin-top: 14px;
-  padding-top: 14px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid #334155;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px;
 }
 
 .customer-card {
   background: #0f172a;
   border: 1px solid #334155;
-  border-radius: 10px;
-  padding: 10px;
+  border-radius: 6px;
+  padding: 7px 9px;
 }
 
 .customer-title {
-  margin: 0 0 8px;
+  margin: 0 0 5px;
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .update-count {
   color: #fbbf24;
   font-weight: 700;
-  margin-left: 6px;
+  margin-left: 5px;
 }
 
 .device-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  border-radius: 8px;
+  gap: 6px;
+  border-radius: 5px;
   background: #1e293b;
-  padding: 8px 10px;
-  margin-bottom: 6px;
+  padding: 5px 8px;
+  margin-bottom: 4px;
 }
 
 .device-name {
   color: #cbd5e1;
-  font-size: 15px;
+  font-size: 12px;
 }
 
 .device-version {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
 .device-pill {
   display: inline-block;
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 2px 7px;
+  font-size: 11px;
   font-weight: 700;
   background: #78350f;
   color: #fbbf24;
+  white-space: nowrap;
 }
 
 .more-devices {
   color: #64748b;
-  font-size: 13px;
-  margin-top: 2px;
+  font-size: 11px;
+  margin-top: 1px;
 }
 
 .loading {

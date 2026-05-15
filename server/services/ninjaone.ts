@@ -480,6 +480,52 @@ function getMockData(): Customer[] {
   });
 }
 
+export interface BackupJob {
+  deviceId: number;
+  deviceName: string;
+  orgName: string;
+  planName: string;
+  status: string;
+  lastRunTime?: string;
+  sizeBytes?: number;
+}
+
+export async function fetchNinjaOneBackups(): Promise<BackupJob[]> {
+  const { apiUrl, apiKey, clientId, clientSecret } = getNinjaOneRuntimeConfig();
+  if (!apiUrl) throw new Error('NinjaOne API URL is required');
+
+  const authorizationHeader = await getAuthorizationHeader(apiUrl, apiKey, clientId, clientSecret);
+
+  const res = await fetch(`${apiUrl}/queries/backup-jobs`, {
+    headers: { 'Authorization': authorizationHeader, 'Accept': 'application/json' },
+  });
+
+  if (!res.ok) {
+    throw new Error(`NinjaOne backup API error: ${res.status} ${res.statusText}`);
+  }
+
+  const payload = await res.json() as any;
+  const results: any[] = Array.isArray(payload) ? payload : (payload?.results ?? []);
+
+  return results.map((job: any) => ({
+    deviceId: Number(job.deviceId ?? job.id ?? 0),
+    deviceName: String(job.deviceName ?? job.systemName ?? job.deviceSystemName ?? '–'),
+    orgName: String(job.organizationName ?? job.orgName ?? '–'),
+    planName: String(job.planName ?? job.name ?? '–'),
+    status: String(job.status ?? 'UNKNOWN'),
+    lastRunTime: job.lastRunTime
+      ? (typeof job.lastRunTime === 'number'
+        ? new Date(job.lastRunTime * 1000).toISOString()
+        : String(job.lastRunTime))
+      : (job.createTime
+        ? (typeof job.createTime === 'number'
+          ? new Date(job.createTime * 1000).toISOString()
+          : String(job.createTime))
+        : undefined),
+    sizeBytes: job.sizeBytes != null ? Number(job.sizeBytes) : undefined,
+  }));
+}
+
 export async function syncNinjaOneData(): Promise<{ customers: number; devices: number }> {
   if (!isNinjaOneConfigured()) {
     return { customers: 0, devices: 0 };
