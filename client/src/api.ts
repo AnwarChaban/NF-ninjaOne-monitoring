@@ -289,6 +289,120 @@ export async function deleteDevice(id: number): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete device');
 }
 
+// --- Backup ---
+
+export type BackupStatus = 'success' | 'failed' | 'missed' | 'unknown';
+
+export interface BackupAccount {
+  id: number;
+  customerId: number;
+  customerName: string;
+  fromEmail: string;
+  name: string;
+}
+
+export interface BackupCheckDef {
+  id: number;
+  backupAccountId: number;
+  customerId: number;
+  customerName: string;
+  fromEmail: string;
+  name: string;
+  intervalHours: number;
+  graceHours: number;
+  subjectFilter: string | null;
+  subjectMatchType: 'contains' | 'exact';
+  bodyFilter: string | null;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface BackupCheckStatus extends BackupCheckDef {
+  currentStatus: BackupStatus;
+  lastReceivedAt: string | null;
+  lastEmailStatus: 'success' | 'failed' | null;
+  recentResults: Array<{ slotEnd: string; status: 'success' | 'failed' | 'missed' }>;
+}
+
+export interface BackupCustomerGroup {
+  customerId: number;
+  customerName: string;
+  fromEmail: string;
+  checks: BackupCheckStatus[];
+}
+
+export interface BackupDashboardResponse {
+  configured: boolean;
+  groups: BackupCustomerGroup[];
+}
+
+export async function fetchBackupStatus(): Promise<BackupDashboardResponse> {
+  const res = await fetch(`${BASE}/backup/status`);
+  if (!res.ok) throw new Error('Failed to fetch backup status');
+  return res.json();
+}
+
+export async function triggerBackupSync(): Promise<{ ok: boolean; checked: number; newResults: number }> {
+  const res = await fetch(`${BASE}/backup/sync`, { method: 'POST' });
+  if (!res.ok) return throwApiError(res, 'Backup sync failed');
+  return res.json();
+}
+
+export async function fetchBackupAccounts(): Promise<BackupAccount[]> {
+  const res = await fetch(`${BASE}/admin/backup-accounts`);
+  if (!res.ok) throw new Error('Failed to fetch backup accounts');
+  return res.json();
+}
+
+export async function createBackupAccount(customerId: number, data: { fromEmail: string; name: string }): Promise<{ ok: boolean; id: number }> {
+  const res = await fetch(`${BASE}/admin/customers/${customerId}/backup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to create backup account');
+  return res.json();
+}
+
+export async function deleteBackupAccount(customerId: number): Promise<void> {
+  const res = await fetch(`${BASE}/admin/customers/${customerId}/backup`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete backup account');
+}
+
+export async function fetchBackupChecks(): Promise<BackupCheckDef[]> {
+  const res = await fetch(`${BASE}/admin/backup-checks`);
+  if (!res.ok) throw new Error('Failed to fetch backup checks');
+  return res.json();
+}
+
+export async function createBackupCheck(data: {
+  backupAccountId: number; name: string; intervalHours: number;
+  graceHours?: number; subjectFilter?: string | null;
+  subjectMatchType?: 'contains' | 'exact'; bodyFilter?: string | null;
+}): Promise<{ ok: boolean; id: number }> {
+  const res = await fetch(`${BASE}/admin/backup-checks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to create backup check');
+  return res.json();
+}
+
+export async function updateBackupCheck(id: number, data: Partial<Omit<BackupCheckDef, 'id' | 'customerName' | 'fromEmail' | 'createdAt'>>): Promise<void> {
+  const res = await fetch(`${BASE}/admin/backup-checks/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to update backup check');
+}
+
+export async function deleteBackupCheck(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/admin/backup-checks/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete backup check');
+}
+
 // --- Admin: Settings ---
 
 export async function updateSettings(data: Record<string, string>): Promise<void> {

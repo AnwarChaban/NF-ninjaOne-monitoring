@@ -8,11 +8,13 @@ import productsRouter from './routes/products';
 import checksRouter from './routes/checks';
 import settingsRouter from './routes/settings';
 import adminRouter from './routes/admin';
+import backupRouter from './routes/backup';
 import { fetchAllLatestVersions } from './services/version-fetcher';
 import { compareVersions } from './services/comparator';
 import { sendNotifications, type UpdateNotification } from './services/notifier';
-import { isNinjaOneConfigured } from './services/runtime-settings';
+import { isNinjaOneConfigured, isGraphConfigured } from './services/runtime-settings';
 import { getAllDevicesByProduct } from './services/customers';
+import { syncBackupEmails } from './services/backup-checker';
 import { syncNinjaOneData } from './services/ninjaone';
 
 const app = express();
@@ -25,6 +27,7 @@ app.use('/api', productsRouter);
 app.use('/api', checksRouter);
 app.use('/api', settingsRouter);
 app.use('/api', adminRouter);
+app.use('/api', backupRouter);
 
 // Serve React frontend in production
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
@@ -64,6 +67,18 @@ async function runScheduledCheck() {
 
 cron.schedule(config.checkCron, runScheduledCheck);
 console.log(`[Scheduler] Cron scheduled: ${config.checkCron}`);
+
+cron.schedule(config.backupSyncCron, async () => {
+  if (!isGraphConfigured()) return;
+  console.log(`[Scheduler] Running backup email sync at ${new Date().toISOString()}`);
+  try {
+    const result = await syncBackupEmails();
+    console.log(`[Scheduler] Backup sync complete. ${result.newResults} new result(s) from ${result.checked} check(s).`);
+  } catch (error) {
+    console.error('[Scheduler] Backup sync failed:', error);
+  }
+});
+console.log(`[Scheduler] Backup sync cron scheduled: ${config.backupSyncCron}`);
 
 cron.schedule(config.ninjaSyncCron, async () => {
   if (!isNinjaOneConfigured()) {

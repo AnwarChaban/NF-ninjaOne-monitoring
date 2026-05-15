@@ -24,6 +24,12 @@ const sectionTitleStyle: React.CSSProperties = {
   marginBottom: '12px',
 };
 
+function extractTenantId(tokenUrl: string): string {
+  const match = tokenUrl.match(/login\.microsoftonline\.com\/([^/]+)\//);
+  return match ? match[1] : tokenUrl.trim();
+}
+
+
 export default function SettingsPage() {
   const [ninjaApiKey, setNinjaApiKey] = useState('');
   const [ninjaClientId, setNinjaClientId] = useState('');
@@ -34,6 +40,10 @@ export default function SettingsPage() {
   const [sophosApiKey, setSophosApiKey] = useState('');
   const [sophosClientId, setSophosClientId] = useState('');
   const [sophosClientSecret, setSophosClientSecret] = useState('');
+  const [graphTokenUrl, setGraphTokenUrl] = useState('');
+  const [graphClientId, setGraphClientId] = useState('');
+  const [graphClientSecret, setGraphClientSecret] = useState('');
+  const [backupMailbox, setBackupMailbox] = useState('');
   const [showUpToDateDevices, setShowUpToDateDevices] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -48,6 +58,13 @@ export default function SettingsPage() {
     setSophosApiKey(s.sophosApiKey || '');
     setSophosClientId(s.sophosClientId || '');
     setSophosClientSecret(s.sophosClientSecret || '');
+    const tenantId = s.graphTenantId || '';
+    setGraphTokenUrl(tenantId
+      ? `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`
+      : '');
+    setGraphClientId(s.graphClientId || '');
+    setGraphClientSecret(s.graphClientSecret || '');
+    setBackupMailbox(s.backupMailbox || '');
     setShowUpToDateDevices(s.showUpToDateDevices === 'true');
   }
 
@@ -64,6 +81,10 @@ export default function SettingsPage() {
       sophosApiKey,
       sophosClientId,
       sophosClientSecret,
+      graphTenantId: extractTenantId(graphTokenUrl),
+      graphClientId,
+      graphClientSecret,
+      backupMailbox,
       showUpToDateDevices: showUpToDateDevices ? 'true' : 'false',
     });
     setSaved(true);
@@ -127,6 +148,63 @@ export default function SettingsPage() {
               <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>Client Secret</label>
               <input style={inputStyle} type="password" placeholder="Client Secret" value={sophosClientSecret} onChange={e => setSophosClientSecret(e.target.value)} />
             </div>
+          </div>
+        </div>
+
+        <div style={{ ...cardStyle, gridColumn: '1 / -1' }}>
+          <h3 style={sectionTitleStyle}>Microsoft Graph API (Backup)</h3>
+
+          {/* Postman-style rows */}
+          <div style={{ display: 'grid', rowGap: '10px' }}>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 500 }}>Grant type</span>
+              <span style={{ padding: '8px 12px', backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', color: '#64748b', fontSize: '13px', fontFamily: 'monospace' }}>
+                Client Credentials
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Access Token URL</span>
+              <div>
+                <input
+                  style={inputStyle}
+                  placeholder="https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token"
+                  value={graphTokenUrl}
+                  onChange={e => setGraphTokenUrl(e.target.value)}
+                />
+                {extractTenantId(graphTokenUrl) && graphTokenUrl.includes('microsoftonline') && (
+                  <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px', fontFamily: 'monospace' }}>
+                    Tenant ID: {extractTenantId(graphTokenUrl)}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Client ID</span>
+              <input style={inputStyle} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value={graphClientId} onChange={e => setGraphClientId(e.target.value)} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Client Secret</span>
+              <input style={inputStyle} type="password" placeholder="••••••••••••••••••••" value={graphClientSecret} onChange={e => setGraphClientSecret(e.target.value)} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 500 }}>Scope</span>
+              <span style={{ padding: '8px 12px', backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', color: '#64748b', fontSize: '13px', fontFamily: 'monospace' }}>
+                https://graph.microsoft.com/.default
+              </span>
+            </div>
+
+            <div style={{ height: '1px', backgroundColor: '#1e293b', margin: '4px 0' }} />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Backup-Postfach</span>
+              <input style={inputStyle} placeholder="backup@firma.de" value={backupMailbox} onChange={e => setBackupMailbox(e.target.value)} />
+            </div>
+
           </div>
         </div>
 

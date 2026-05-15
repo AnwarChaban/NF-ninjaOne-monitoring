@@ -4,7 +4,9 @@ import {
   createDevice, updateDevice, deleteDevice,
   fetchScraperProducts, fetchCustomProducts, triggerNinjaSync, triggerUnifiSync,
   fetchUnifiMappings, createUnifiMapping, deleteUnifiMapping, fetchUnifiUnmatchedHosts,
-  type MockCustomer, type MockDevice, type ScraperProduct, type CustomProduct, type UnifiCustomerMapping, type UnifiUnmatchedHost,
+  fetchBackupAccounts, createBackupAccount, deleteBackupAccount,
+  type MockCustomer, type MockDevice, type ScraperProduct, type CustomProduct,
+  type UnifiCustomerMapping, type UnifiUnmatchedHost, type BackupAccount,
 } from '../../api';
 
 const inputStyle: React.CSSProperties = {
@@ -88,6 +90,8 @@ export default function CustomersPage() {
   const [mappingForm, setMappingForm] = useState<{ hostName: string; customerId: string }>({ hostName: '', customerId: '' });
   const [isSavingMapping, setIsSavingMapping] = useState(false);
   const [mappingMessage, setMappingMessage] = useState<string | null>(null);
+  const [backupAccounts, setBackupAccounts] = useState<BackupAccount[]>([]);
+  const [backupAccountForms, setBackupAccountForms] = useState<Record<number, { fromEmail: string; name: string }>>({});
   const hasAutoSyncedRef = useRef(false);
   const [addingProductForDevice, setAddingProductForDevice] = useState<{
     customerId: number;
@@ -100,17 +104,33 @@ export default function CustomersPage() {
   } | null>(null);
 
   async function load() {
-    const [c, sp, cp, mappings, unmatched] = await Promise.all([
-      fetchCustomers(),
-      fetchScraperProducts(),
-      fetchCustomProducts(),
-      fetchUnifiMappings(),
-      fetchUnifiUnmatchedHosts(),
+    const [c, sp, cp, mappings, unmatched, bAccounts] = await Promise.all([
+      fetchCustomers().catch(() => [] as typeof customers),
+      fetchScraperProducts().catch(() => [] as ScraperProduct[]),
+      fetchCustomProducts().catch(() => [] as CustomProduct[]),
+      fetchUnifiMappings().catch(() => [] as UnifiCustomerMapping[]),
+      fetchUnifiUnmatchedHosts().catch(() => [] as UnifiUnmatchedHost[]),
+      fetchBackupAccounts().catch(() => [] as BackupAccount[]),
     ]);
     setCustomers(c);
     setProducts([...sp.map(p => p.product), ...cp.map(p => p.id)]);
     setUnifiMappings(mappings);
     setUnmatchedHosts(unmatched);
+    setBackupAccounts(bAccounts);
+  }
+
+  async function handleCreateBackupAccount(customerId: number) {
+    const form = backupAccountForms[customerId];
+    if (!form?.fromEmail || !form?.name) return;
+    await createBackupAccount(customerId, { fromEmail: form.fromEmail, name: form.name });
+    setBackupAccountForms(prev => { const next = { ...prev }; delete next[customerId]; return next; });
+    load();
+  }
+
+  async function handleDeleteBackupAccount(customerId: number) {
+    if (!confirm('Backup-Account löschen? Alle zugehörigen Checks werden ebenfalls gelöscht.')) return;
+    await deleteBackupAccount(customerId);
+    load();
   }
 
   function toggleExpandedDevice(key: string) {
@@ -180,38 +200,8 @@ export default function CustomersPage() {
     await load();
   }
 
-  async function handleAutoSyncSequence() {
-    setSyncMessage('Automatische Synchronisierung: NinjaOne startet...');
-
-    setIsSyncingNinja(true);
-    try {
-      const ninjaResult = await triggerNinjaSync();
-      setSyncMessage(`NinjaOne synchronisiert: ${ninjaResult.customers} Kunden, ${ninjaResult.devices} Produkt-Einträge. Starte UniFi...`);
-    } catch (error) {
-      setSyncMessage((error as Error).message || 'NinjaOne-Sync fehlgeschlagen');
-    } finally {
-      setIsSyncingNinja(false);
-    }
-
-    // setIsSyncingUnifi(true);
-    // try {
-    //   const unifiResult = await triggerUnifiSync();
-    //   setSyncMessage(
-    //     `UniFi synchronisiert: ${unifiResult.hosts} Hosts, ${unifiResult.devices} Geräte, ${unifiResult.unmatchedHosts} ohne Match, ${unifiResult.ambiguousHosts} mehrdeutig`
-    //   );
-    // } catch (error) {
-    //   setSyncMessage((error as Error).message || 'UniFi-Sync fehlgeschlagen');
-    // } finally {
-    //   setIsSyncingUnifi(false);
-    //   await load();
-    // }
-  }
-
   useEffect(() => {
-    if (hasAutoSyncedRef.current) return;
-    hasAutoSyncedRef.current = true;
-
-    handleAutoSyncSequence();
+    load();
   }, []);
 
   async function handleCreateCustomer() {
@@ -469,6 +459,19 @@ export default function CustomersPage() {
                 <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 400, marginLeft: '8px' }}>
                   ({groupedDevices.length} Geräte)
                 </span>
+                {(() => {
+                  const account = backupAccounts.find(a => a.customerId === customer.id);
+                  return account ? (
+                    <span style={{
+                      fontSize: '11px', fontWeight: 500, color: '#6ee7b7',
+                      backgroundColor: '#064e3b', borderRadius: '4px',
+                      padding: '2px 7px', marginLeft: '4px',
+                      fontFamily: 'monospace', letterSpacing: '0.01em',
+                    }}>
+                      ✉ {account.fromEmail}
+                    </span>
+                  ) : null;
+                })()}
               </div>
               <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
                 <button style={ghostBtn} onClick={() => setEditingCustomer({ id: customer.id, name: customer.name })}>Bearbeiten</button>
@@ -476,6 +479,58 @@ export default function CustomersPage() {
               </div>
             </div>
           )}
+
+          {/* Backup Account — inline, direkt nach Header */}
+          {isCustomerExpanded && (() => {
+            const account = backupAccounts.find(a => a.customerId === customer.id);
+            const form = backupAccountForms[customer.id];
+            return (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '8px 0 10px', marginBottom: '8px',
+                borderBottom: '1px solid #1e293b', flexWrap: 'wrap',
+              }}>
+                <span style={{ color: '#475569', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', minWidth: '90px' }}>
+                  Backup FROM
+                </span>
+                {account ? (
+                  <>
+                    <span style={{
+                      fontSize: '12px', color: '#6ee7b7', fontFamily: 'monospace',
+                      backgroundColor: '#064e3b', borderRadius: '4px', padding: '2px 8px',
+                    }}>
+                      {account.fromEmail}
+                    </span>
+                    <button
+                      style={{ ...dangerBtn, padding: '3px 8px', fontSize: '11px' }}
+                      onClick={() => handleDeleteBackupAccount(customer.id)}
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      style={{ ...inputStyle, width: '240px', fontSize: '12px', padding: '4px 8px' }}
+                      placeholder="FROM-Adresse (z.B. HdL@monitor.nf-hosting.de)"
+                      value={form?.fromEmail ?? ''}
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => setBackupAccountForms(prev => ({
+                        ...prev,
+                        [customer.id]: { fromEmail: e.target.value, name: prev[customer.id]?.name ?? customer.name },
+                      }))}
+                    />
+                    <button
+                      style={{ ...primaryBtn, padding: '4px 10px', fontSize: '12px' }}
+                      onClick={e => { e.stopPropagation(); handleCreateBackupAccount(customer.id); }}
+                    >
+                      Speichern
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Devices Table */}
           {isCustomerExpanded && groupedDevices.length > 0 && (

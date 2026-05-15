@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { fetchProducts, fetchSettings, type ProductStatus } from './api';
 import ProductCard from './components/ProductCard';
 import AdminLayout from './components/AdminLayout';
+import Sidebar from './components/Sidebar';
+import BackupDashboard from './components/BackupDashboard';
 
 const REFRESH_INTERVAL = 60_000; // Auto-refresh every 60 seconds
 
@@ -154,15 +156,6 @@ function Dashboard() {
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <a
-              href="#/admin"
-              style={{
-                padding: '6px 14px', borderRadius: '6px', border: '1px solid #334155',
-                color: '#94a3b8', textDecoration: 'none', fontSize: '13px', fontWeight: 500,
-              }}
-            >
-              Admin
-            </a>
             {lastUpdate && (
               <span style={{ color: '#64748b', fontSize: '12px' }}>
                 Aktualisiert: {lastUpdate.toLocaleTimeString('de-DE')}
@@ -210,6 +203,16 @@ function Dashboard() {
 export default function App() {
   const hash = useHash();
   const isAdmin = hash.startsWith('#/admin');
+  const isBackup = hash.startsWith('#/backup');
 
-  return isAdmin ? <AdminLayout /> : <Dashboard />;
+  if (isAdmin) return <AdminLayout />;
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar activeView={isBackup ? 'backup' : 'versions'} />
+      <main style={{ flex: 1, overflow: 'auto' }}>
+        {isBackup ? <BackupDashboard /> : <Dashboard />}
+      </main>
+    </div>
+  );
 }

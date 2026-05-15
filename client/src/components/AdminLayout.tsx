@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import CustomersPage from './admin/CustomersPage';
 import ProductsPage from './admin/ProductsPage';
 import SettingsPage from './admin/SettingsPage';
+import BackupChecksPage from './admin/BackupChecksPage';
 
-type AdminTab = 'customers' | 'products' | 'settings';
+type AdminTab = 'customers' | 'products' | 'backup-checks' | 'settings';
 
 const tabs: { key: AdminTab; label: string }[] = [
   { key: 'customers', label: 'Kunden' },
   { key: 'products', label: 'Produkte' },
+  { key: 'backup-checks', label: 'Backup-Checks' },
   { key: 'settings', label: 'Einstellungen' },
 ];
 
@@ -64,6 +66,7 @@ export default function AdminLayout() {
       <main style={{ flex: 1, padding: '32px 40px', overflow: 'auto' }}>
         {activeTab === 'customers' && <CustomersPage />}
         {activeTab === 'products' && <ProductsPage />}
+        {activeTab === 'backup-checks' && <BackupChecksPage />}
         {activeTab === 'settings' && <SettingsPage />}
       </main>
     </div>

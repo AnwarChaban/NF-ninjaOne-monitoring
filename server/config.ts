@@ -21,6 +21,15 @@ export const config = {
     clientSecret: process.env.UNIFI_CLIENT_SECRET || '',
   },
 
+  graph: {
+    tenantId: process.env.GRAPH_TENANT_ID || '',
+    clientId: process.env.GRAPH_CLIENT_ID || '',
+    clientSecret: process.env.GRAPH_CLIENT_SECRET || '',
+  },
+
+  backupMailbox: process.env.BACKUP_MAILBOX || '',
+  backupSyncCron: process.env.BACKUP_SYNC_CRON || '*/15 * * * *',
+
   webhookUrl: process.env.WEBHOOK_URL || '',
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || '',
 

@@ -66,3 +66,26 @@ export function getWebhookUrl(): string {
 export function getSlackWebhookUrl(): string {
   return getSettingOrFallback('slackWebhookUrl', config.slackWebhookUrl);
 }
+
+export interface GraphRuntimeConfig {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+}
+
+export function getGraphRuntimeConfig(): GraphRuntimeConfig {
+  return {
+    tenantId: getSettingOrFallback('graphTenantId', config.graph.tenantId),
+    clientId: getSettingOrFallback('graphClientId', config.graph.clientId),
+    clientSecret: getSettingOrFallback('graphClientSecret', config.graph.clientSecret),
+  };
+}
+
+export function isGraphConfigured(): boolean {
+  const cfg = getGraphRuntimeConfig();
+  return !!(cfg.tenantId && cfg.clientId && cfg.clientSecret);
+}
+
+export function getBackupMailbox(): string {
+  return getSettingOrFallback('backupMailbox', config.backupMailbox);
+}

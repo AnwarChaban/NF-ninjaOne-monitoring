@@ -489,6 +489,41 @@ router.delete('/admin/devices/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Backup Accounts ---
+
+router.post('/admin/customers/:id/backup', (req, res) => {
+  const db = getDb();
+  const { fromEmail, name } = req.body as { fromEmail?: string; name?: string };
+  const customerId = parseInt(req.params.id);
+
+  if (!fromEmail || !name) {
+    res.status(400).json({ error: 'fromEmail and name are required' });
+    return;
+  }
+
+  const customer = db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId);
+  if (!customer) {
+    res.status(404).json({ error: 'Customer not found' });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  try {
+    const result = db
+      .prepare('INSERT INTO backup_accounts (customer_id, from_email, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(customerId, fromEmail, name, now, now);
+    res.json({ ok: true, id: result.lastInsertRowid });
+  } catch {
+    res.status(409).json({ error: 'Backup account already exists for this customer' });
+  }
+});
+
+router.delete('/admin/customers/:id/backup', (req, res) => {
+  const db = getDb();
+  db.prepare('DELETE FROM backup_accounts WHERE customer_id = ?').run(parseInt(req.params.id));
+  res.json({ ok: true });
+});
+
 // --- NinjaOne Sync ---
 
 router.post('/admin/ninjaone/sync', async (_req, res) => {

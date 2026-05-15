@@ -15,6 +15,10 @@ const ALLOWED_SETTINGS_KEYS = new Set([
   'sophosApiKey',
   'sophosClientId',
   'sophosClientSecret',
+  'graphTenantId',
+  'graphClientId',
+  'graphClientSecret',
+  'backupMailbox',
   'showUpToDateDevices',
 ]);
 
@@ -30,6 +34,10 @@ router.get('/settings', (_req, res) => {
     sophosApiKey: '',
     sophosClientId: '',
     sophosClientSecret: '',
+    graphTenantId: config.graph.tenantId || '',
+    graphClientId: config.graph.clientId || '',
+    graphClientSecret: config.graph.clientSecret || '',
+    backupMailbox: config.backupMailbox || '',
     showUpToDateDevices: 'false',
   };
 

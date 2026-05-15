@@ -138,14 +138,101 @@ function initDb() {
       reason TEXT NOT NULL,
       synced_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS backup_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL UNIQUE,
+      from_email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_checks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      backup_account_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      interval_hours REAL NOT NULL DEFAULT 24,
+      grace_hours REAL NOT NULL DEFAULT 1,
+      subject_filter TEXT,
+      subject_match_type TEXT NOT NULL DEFAULT 'contains',
+      body_filter TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (backup_account_id) REFERENCES backup_accounts(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_check_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      check_id INTEGER NOT NULL,
+      message_id TEXT NOT NULL UNIQUE,
+      received_at TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (check_id) REFERENCES backup_checks(id) ON DELETE CASCADE
+    );
   `);
 
   createIndexes();
+  migrateBackupSchema();
 
   // NOW run migration if old schema existed
   if (hasOldSchema) {
     console.log('Old schema detected, migration available but skipped for this version');
     // migrateFromOldSchema();
+  }
+}
+
+function migrateBackupSchema() {
+  // If backup_checks was created with old customer_id column, drop and recreate
+  const cols = db.prepare("PRAGMA table_info(backup_checks)").all() as Array<{ name: string }>;
+  if (cols.length > 0 && cols.some(c => c.name === 'customer_id')) {
+    console.log('[DB] Migrating backup_checks to new schema (backup_account_id)...');
+    db.exec(`
+      DROP TABLE IF EXISTS backup_check_results;
+      DROP TABLE IF EXISTS backup_checks;
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS backup_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL UNIQUE,
+        from_email TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS backup_checks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        backup_account_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        interval_hours REAL NOT NULL DEFAULT 24,
+        grace_hours REAL NOT NULL DEFAULT 1,
+        subject_filter TEXT,
+        subject_match_type TEXT NOT NULL DEFAULT 'contains',
+        body_filter TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (backup_account_id) REFERENCES backup_accounts(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS backup_check_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        check_id INTEGER NOT NULL,
+        message_id TEXT NOT NULL UNIQUE,
+        received_at TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (check_id) REFERENCES backup_checks(id) ON DELETE CASCADE
+      );
+    `);
+    console.log('[DB] Backup schema migration complete.');
   }
 }
 
