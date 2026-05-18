@@ -9,6 +9,7 @@ import checksRouter from './routes/checks';
 import settingsRouter from './routes/settings';
 import adminRouter from './routes/admin';
 import backupRouter from './routes/backup';
+import customersRouter from './routes/customers';
 import { fetchAllLatestVersions } from './services/version-fetcher';
 import { compareVersions } from './services/comparator';
 import { sendNotifications, type UpdateNotification } from './services/notifier';
@@ -28,6 +29,7 @@ app.use('/api', checksRouter);
 app.use('/api', settingsRouter);
 app.use('/api', adminRouter);
 app.use('/api', backupRouter);
+app.use('/api', customersRouter);
 
 // Serve React frontend in production
 const clientDist = path.join(__dirname, '..', 'client', 'dist');

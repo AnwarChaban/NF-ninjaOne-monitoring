@@ -411,6 +411,52 @@ export async function deleteBackupCheck(id: number): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete backup check');
 }
 
+// --- Customer Overview & Detail ---
+
+export interface CustomerSummary {
+  id: number;
+  name: string;
+  totalDevices: number;
+  outdatedDevices: number;
+  backupStatus: BackupStatus | 'none';
+}
+
+export interface CustomerDeviceDetail {
+  id: number;
+  name: string;
+  source: 'ninjaone' | 'unifi' | 'sophos';
+  currentVersion: string;
+  latestVersion?: string;
+  status: 'up-to-date' | 'update-available' | 'major-update' | 'unknown';
+}
+
+export interface CustomerProductGroup {
+  productId: string;
+  productName: string;
+  latestVersion: string;
+  releaseUrl: string;
+  devices: CustomerDeviceDetail[];
+}
+
+export interface CustomerDetail {
+  id: number;
+  name: string;
+  products: CustomerProductGroup[];
+  backup: BackupCheckStatus[];
+}
+
+export async function fetchCustomerList(): Promise<CustomerSummary[]> {
+  const res = await fetch(`${BASE}/customers`);
+  if (!res.ok) throw new Error('Failed to fetch customers');
+  return res.json();
+}
+
+export async function fetchCustomerDetail(id: number): Promise<CustomerDetail> {
+  const res = await fetch(`${BASE}/customers/${id}`);
+  if (!res.ok) throw new Error('Failed to fetch customer detail');
+  return res.json();
+}
+
 // --- Admin: Settings ---
 
 export async function updateSettings(data: Record<string, string>): Promise<void> {

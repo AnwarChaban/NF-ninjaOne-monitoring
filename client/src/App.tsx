@@ -4,6 +4,10 @@ import ProductCard from './components/ProductCard';
 import AdminLayout from './components/AdminLayout';
 import Sidebar from './components/Sidebar';
 import BackupDashboard from './components/BackupDashboard';
+import CustomerOverview from './components/CustomerOverview';
+import CustomerDetailPage from './components/CustomerDetailPage';
+
+type GroupBy = 'software' | 'kunde';
 
 const REFRESH_INTERVAL = 60_000; // Auto-refresh every 60 seconds
 
@@ -24,6 +28,7 @@ function Dashboard() {
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [showUpToDateDevices, setShowUpToDateDevices] = useState(false);
+  const [groupBy, setGroupBy] = useState<GroupBy>('software');
 
   async function loadProducts() {
     try {
@@ -139,7 +144,7 @@ function Dashboard() {
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 16px' }}>
-      <header style={{ marginBottom: '32px' }}>
+      <header style={{ marginBottom: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9' }}>
@@ -152,7 +157,6 @@ function Dashboard() {
                   {updatesAvailable} Update(s) verfügbar
                 </span>
               )}
-             
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -162,6 +166,30 @@ function Dashboard() {
               </span>
             )}
           </div>
+        </div>
+
+        {/* Toggle: Nach Software / Nach Kunde */}
+        <div style={{ display: 'flex', gap: '4px', marginTop: '20px', background: '#0f172a', borderRadius: '8px', padding: '4px', width: 'fit-content' }}>
+          {(['software', 'kunde'] as GroupBy[]).map(view => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => setGroupBy(view)}
+              style={{
+                padding: '6px 18px',
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                backgroundColor: groupBy === view ? '#1e293b' : 'transparent',
+                color: groupBy === view ? '#f1f5f9' : '#64748b',
+                transition: 'all 0.15s',
+              }}
+            >
+              {view === 'software' ? 'Nach Software' : 'Nach Kunde'}
+            </button>
+          ))}
         </div>
       </header>
 
@@ -178,7 +206,9 @@ function Dashboard() {
         </div>
       )}
 
-      {loading ? (
+      {groupBy === 'kunde' ? (
+        <CustomerOverview embedded />
+      ) : loading ? (
         <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>Lade Daten...</p>
       ) : (
         <div style={{
@@ -207,11 +237,18 @@ export default function App() {
 
   if (isAdmin) return <AdminLayout />;
 
+  const customerDetailMatch = hash.match(/^#\/customers\/(\d+)$/);
+  const customerDetailId = customerDetailMatch ? parseInt(customerDetailMatch[1]) : null;
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar activeView={isBackup ? 'backup' : 'versions'} />
       <main style={{ flex: 1, overflowY: 'auto' }}>
-        {isBackup ? <BackupDashboard /> : <Dashboard />}
+        {isBackup && <BackupDashboard />}
+        {!isBackup && customerDetailId !== null && (
+          <CustomerDetailPage customerId={customerDetailId} />
+        )}
+        {!isBackup && customerDetailId === null && <Dashboard />}
       </main>
     </div>
   );

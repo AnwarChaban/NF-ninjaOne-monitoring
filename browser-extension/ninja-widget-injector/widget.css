@@ -13,12 +13,45 @@ body {
   padding: 8px;
 }
 
+.widget-top {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .widget-meta {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
   gap: 8px;
+}
+
+.toggle-bar {
+  display: flex;
+  gap: 3px;
+  background: #0f172a;
+  border-radius: 7px;
+  padding: 3px;
+  width: fit-content;
+}
+
+.toggle-btn {
+  padding: 5px 14px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  background: transparent;
+  color: #64748b;
+  transition: all 0.15s;
+}
+
+.toggle-btn.toggle-active {
+  background: #1e293b;
+  color: #f1f5f9;
 }
 
 .meta-pill {
@@ -169,4 +202,212 @@ body {
 
 .hidden {
   display: none;
+}
+
+/* Kunden-Ansicht */
+.customer-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.customer-overview-card {
+  background: #1e293b;
+  border-left: 3px solid #1e293b;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  text-decoration: none;
+  display: block;
+}
+
+.customer-overview-card:hover {
+  background: #263347;
+}
+
+.customer-overview-card.has-updates {
+  border-left-color: #78350f;
+}
+
+.customer-overview-card.has-major {
+  border-left-color: #7f1d1d;
+}
+
+.customer-overview-card.has-backup-issue {
+  border-left-color: #7f1d1d;
+}
+
+.customer-overview-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.customer-overview-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.badge-update {
+  background: #78350f;
+  color: #fbbf24;
+}
+
+.badge-ok {
+  background: #065f46;
+  color: #6ee7b7;
+}
+
+.badge-backup-ok {
+  background: #22c55e22;
+  color: #22c55e;
+  border: 1px solid #22c55e44;
+}
+
+.badge-backup-warn {
+  background: #ef444422;
+  color: #ef4444;
+  border: 1px solid #ef444444;
+}
+
+.badge-backup-unknown {
+  background: #33415522;
+  color: #64748b;
+  border: 1px solid #33415544;
+}
+
+.customer-overview-meta {
+  font-size: 11px;
+  color: #475569;
+}
+
+/* Kunden-Detail */
+.detail-header {
+  margin-bottom: 14px;
+}
+
+.detail-back-btn {
+  background: transparent;
+  border: none;
+  color: #60a5fa;
+  font-size: 12px;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.detail-back-btn:hover {
+  color: #93c5fd;
+}
+
+.detail-customer-name {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 800;
+  color: #f1f5f9;
+}
+
+.detail-summary {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.detail-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: 0.08em;
+  margin: 14px 0 8px;
+  text-transform: uppercase;
+}
+
+.detail-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.detail-product-card {
+  background: #0f172a;
+  border-left: 3px solid #1e2d3d;
+  border-radius: 7px;
+  padding: 9px 11px;
+}
+
+.detail-product-top {
+  margin-bottom: 7px;
+}
+
+.detail-product-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.detail-product-version {
+  font-size: 11px;
+  color: #475569;
+  margin-top: 1px;
+}
+
+.detail-device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-radius: 5px;
+  background: #1e293b;
+  padding: 5px 8px;
+  margin-bottom: 4px;
+}
+
+.detail-backup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.detail-backup-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 7px;
+  padding: 9px 11px;
+}
+
+.detail-backup-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.detail-backup-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
