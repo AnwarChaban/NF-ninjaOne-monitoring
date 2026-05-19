@@ -423,17 +423,7 @@ async function fetchFromNinjaOne(): Promise<Customer[]> {
 
       const name = d.systemName || d.dnsName || `Device-${d.id}`;
       const softwareEntries = extractSoftwareEntries(d, customFieldMap);
-      if (softwareEntries.length === 0) {
-        mappedDevices.push({
-          id: rawId * 100 + 1,
-          name,
-          product: 'unknown',
-          currentVersion: 'unknown',
-          orgId: Number(org.id),
-          ninjaDeviceId: rawId,
-        });
-        continue;
-      }
+      if (softwareEntries.length === 0) continue;
 
       mappedDevices.push(...softwareEntries.map((entry, index) => ({
         id: rawId * 100 + index + 1,

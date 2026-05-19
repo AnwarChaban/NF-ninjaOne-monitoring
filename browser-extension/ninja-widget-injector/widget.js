@@ -152,110 +152,310 @@ const fetchProducts       = () => fetchFromApi("/products");
 const fetchCustomers      = () => fetchFromApi("/customers");
 const fetchCustomerDetail = id => fetchFromApi(`/customers/${id}`);
 
-// ── Render: Software view (unchanged) ─────────────────────────────────────────
+// ── Shared: build + render a paginated table with customer grouping ────────────
+
+const PAGE_SIZE = 30;
+
+function makePill(status) {
+  const sc = STATUS_COLOR[status] || STATUS_COLOR.unknown;
+  const pill = document.createElement("span");
+  pill.className = "device-pill";
+  pill.style.backgroundColor = sc.bg;
+  pill.style.color = sc.color;
+  pill.textContent = STATUS_LABEL[status] || STATUS_LABEL.unknown;
+  return pill;
+}
+
+/**
+ * Builds a self-contained paginated table section (collapsible per customer).
+ * columns: ["Kunde","Gerät","Installiert","Aktuell","Status"] when hasCustomerCol=true
+ *          ["Gerät","Quelle","Installiert","Aktuell","Status"] when hasCustomerCol=false
+ *
+ * rows: array of { kind:"header", id, name, outdated, total }
+ *             or { kind:"device", customerId, device, source? }
+ */
+function buildTableSection({ rows: initialRows, hasCustomerCol, onHeightChange }) {
+  const wrap = document.createElement("div");
+  wrap.className = "prod-table-wrap";
+
+  let currentPage = 0;
+  // For customer-grouped mode: track which customers are expanded
+  const expandedMap = {};
+  if (hasCustomerCol) {
+    initialRows.forEach(r => { if (r.kind === "header") expandedMap[r.id] = true; });
+  }
+
+  function getDisplayRows() {
+    if (!hasCustomerCol) return initialRows; // no grouping, all device rows
+    const out = [];
+    for (const r of initialRows) {
+      if (r.kind === "header") {
+        out.push(r);
+        if (expandedMap[r.id]) {
+          initialRows.forEach(dr => { if (dr.kind === "device" && dr.customerId === r.id) out.push(dr); });
+        }
+      }
+    }
+    return out;
+  }
+
+  function render() {
+    wrap.innerHTML = "";
+    const allRows = getDisplayRows();
+    const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+    const safePage = Math.min(currentPage, totalPages - 1);
+    const pageRows = allRows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+    // Table
+    const table = document.createElement("table");
+    table.className = "prod-table";
+
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    const cols = hasCustomerCol
+      ? ["Kunde", "Gerät", "Installiert", "Aktuell", "Status"]
+      : ["Gerät", "Quelle", "Installiert", "Aktuell", "Status"];
+    cols.forEach(col => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    pageRows.forEach(row => {
+      if (row.kind === "header") {
+        const tr = document.createElement("tr");
+        tr.className = "customer-hdr-row";
+        tr.addEventListener("click", () => {
+          expandedMap[row.id] = !expandedMap[row.id];
+          currentPage = 0;
+          render();
+          if (onHeightChange) onHeightChange();
+        });
+        const td = document.createElement("td");
+        td.colSpan = 5;
+
+        const arrow = document.createElement("span");
+        arrow.className = "cust-hdr-arrow";
+        arrow.textContent = expandedMap[row.id] ? "▾" : "▸";
+
+        const name = document.createElement("span");
+        name.className = "cust-hdr-name";
+        name.textContent = row.name;
+
+        td.appendChild(arrow);
+        td.appendChild(name);
+
+        if (row.outdated > 0) {
+          const badge = document.createElement("span");
+          badge.className = "cust-hdr-badge";
+          badge.textContent = `${row.outdated} Update${row.outdated !== 1 ? "s" : ""}`;
+          td.appendChild(badge);
+        }
+
+        const count = document.createElement("span");
+        count.className = "cust-hdr-count";
+        count.textContent = `${row.total} Gerät${row.total !== 1 ? "e" : ""}`;
+        td.appendChild(count);
+
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      // Device row
+      const d = row.device;
+      const tr = document.createElement("tr");
+
+      if (hasCustomerCol) {
+        // indent cell (replaces Kunde column content for device rows)
+        const tdIndent = document.createElement("td");
+        tdIndent.className = "device-indent";
+        tdIndent.textContent = "—";
+        tr.appendChild(tdIndent);
+      }
+
+      const tdName = document.createElement("td");
+      tdName.className = "col-name";
+      tdName.textContent = d.name || "";
+      tr.appendChild(tdName);
+
+      if (!hasCustomerCol) {
+        const tdSource = document.createElement("td");
+        tdSource.className = "col-source";
+        tdSource.textContent = row.source || "";
+        tr.appendChild(tdSource);
+      }
+
+      const tdCurrent = document.createElement("td");
+      tdCurrent.className = "col-mono";
+      tdCurrent.textContent = formatVersion(d.currentVersion);
+      tr.appendChild(tdCurrent);
+
+      const tdLatest = document.createElement("td");
+      tdLatest.className = "col-mono";
+      tdLatest.textContent = d.latestVersion ? formatVersion(d.latestVersion) : "—";
+      tr.appendChild(tdLatest);
+
+      const tdStatus = document.createElement("td");
+      tdStatus.className = "col-status";
+      tdStatus.appendChild(makePill(d.status));
+      tr.appendChild(tdStatus);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+
+    // Pagination
+    if (totalPages > 1) {
+      const pager = document.createElement("div");
+      pager.className = "table-pager";
+
+      const info = document.createElement("span");
+      info.className = "pager-info";
+      info.textContent = `Zeilen ${safePage * PAGE_SIZE + 1}–${Math.min((safePage + 1) * PAGE_SIZE, allRows.length)} von ${allRows.length}`;
+      pager.appendChild(info);
+
+      const btns = document.createElement("div");
+      btns.className = "pager-btns";
+
+      function mkBtn(label, disabled, onClick) {
+        const b = document.createElement("button");
+        b.className = "pager-btn";
+        b.textContent = label;
+        b.disabled = disabled;
+        if (!disabled) b.addEventListener("click", () => { onClick(); render(); if (onHeightChange) onHeightChange(); });
+        return b;
+      }
+
+      btns.appendChild(mkBtn("«", safePage === 0, () => { currentPage = 0; }));
+      btns.appendChild(mkBtn("‹", safePage === 0, () => { currentPage = safePage - 1; }));
+
+      const start = Math.max(0, safePage - 2);
+      const end = Math.min(totalPages - 1, safePage + 2);
+      if (start > 0) { const d = document.createElement("span"); d.textContent = "…"; d.style.cssText = "color:#475569;font-size:11px;padding:0 3px;"; btns.appendChild(d); }
+      for (let i = start; i <= end; i++) {
+        const b = document.createElement("button");
+        b.className = "pager-btn" + (i === safePage ? " active" : "");
+        b.textContent = String(i + 1);
+        if (i !== safePage) b.addEventListener("click", () => { currentPage = i; render(); if (onHeightChange) onHeightChange(); });
+        btns.appendChild(b);
+      }
+      if (end < totalPages - 1) { const d = document.createElement("span"); d.textContent = "…"; d.style.cssText = "color:#475569;font-size:11px;padding:0 3px;"; btns.appendChild(d); }
+
+      btns.appendChild(mkBtn("›", safePage === totalPages - 1, () => { currentPage = safePage + 1; }));
+      btns.appendChild(mkBtn("»", safePage === totalPages - 1, () => { currentPage = totalPages - 1; }));
+
+      pager.appendChild(btns);
+      wrap.appendChild(pager);
+    }
+  }
+
+  render();
+  return wrap;
+}
+
+// ── Render: Software view ──────────────────────────────────────────────────────
 
 function renderProduct(product) {
-  const card = document.createElement("section");
-  card.className = "product-card";
+  const outdatedCount = product.customers.reduce(
+    (s, c) => s + c.devices.filter(d => d.status === "update-available" || d.status === "major-update").length, 0
+  );
+  const totalDevices = product.customers.reduce((s, c) => s + c.devices.length, 0);
 
-  const allDevices = product.customers.flatMap(c => c.devices);
-  const status = calcStatus(allDevices);
-  card.style.borderLeftColor = status.border;
+  // Section wrapper
+  const section = document.createElement("section");
+  section.className = "prod-section" + (outdatedCount > 0 ? " has-updates" : "");
 
-  const title = document.createElement("h3");
-  title.className = "product-title";
-  title.textContent = product.productName || product.product;
+  // Header
+  let isExpanded = outdatedCount > 0;
+  const header = document.createElement("div");
+  header.className = "prod-section-header";
 
-  const badge = document.createElement("span");
-  badge.className = "status-pill";
-  badge.style.backgroundColor = status.pillBg;
-  badge.style.color = status.pillColor;
-  badge.textContent = status.label;
+  const left = document.createElement("div");
+  left.className = "prod-section-left";
 
-  const version = document.createElement("p");
-  version.className = "product-meta";
-  version.textContent = "Version: ";
-  if (product.releaseUrl) {
-    const link = document.createElement("a");
-    link.href = product.releaseUrl;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = formatVersion(product.latestVersion);
-    version.appendChild(link);
-  } else {
-    const text = document.createElement("span");
-    text.textContent = formatVersion(product.latestVersion);
-    version.appendChild(text);
+  const arrow = document.createElement("span");
+  arrow.className = "prod-section-arrow";
+  arrow.textContent = isExpanded ? "▾" : "▸";
+
+  const nameEl = document.createElement("span");
+  nameEl.className = "prod-section-name";
+  nameEl.textContent = product.productName || product.product;
+
+  left.appendChild(arrow);
+  left.appendChild(nameEl);
+
+  if (product.latestVersion) {
+    const ver = document.createElement("span");
+    ver.className = "prod-section-ver";
+    if (product.releaseUrl) {
+      const a = document.createElement("a");
+      a.href = product.releaseUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = formatVersion(product.latestVersion);
+      a.addEventListener("click", e => e.stopPropagation());
+      ver.appendChild(a);
+    } else {
+      ver.textContent = formatVersion(product.latestVersion);
+    }
+    left.appendChild(ver);
   }
 
-  const outdatedCount = allDevices.filter(d => d.status === "update-available" || d.status === "major-update").length;
-  const summary = document.createElement("p");
-  summary.className = "product-summary";
-  summary.textContent = allDevices.length > 0
-    ? outdatedCount > 0 ? `${outdatedCount}/${allDevices.length} Geräte veraltet` : `${allDevices.length} Geräte aktuell`
-    : "Keine Geräte vorhanden";
+  const right = document.createElement("div");
+  right.className = "prod-section-right";
 
-  const customerGrid = document.createElement("div");
-  customerGrid.className = "customer-grid";
-
-  const customers = product.customers
-    .map(c => ({ ...c, devices: c.devices.filter(d => d.status === "update-available" || d.status === "major-update") }))
-    .filter(c => c.devices.length > 0)
-    .sort((a, b) => b.devices.length - a.devices.length);
-
-  for (const customer of customers) {
-    const customerCard = document.createElement("article");
-    customerCard.className = "customer-card";
-    customerCard.style.cursor = "pointer";
-    customerCard.addEventListener("click", () => navigate("detail", customer.id));
-
-    const customerTitle = document.createElement("h4");
-    customerTitle.className = "customer-title";
-    customerTitle.textContent = customer.name;
-    const updSpan = document.createElement("span");
-    updSpan.className = "update-count";
-    updSpan.textContent = `(${customer.devices.length} Updates)`;
-    customerTitle.appendChild(updSpan);
-    customerCard.appendChild(customerTitle);
-
-    const topDevices = customer.devices.slice(0, 3);
-    for (const device of topDevices) {
-      const row = document.createElement("div");
-      row.className = "device-row";
-      const left = document.createElement("div");
-      const deviceName = document.createElement("div");
-      deviceName.className = "device-name";
-      deviceName.textContent = device.name;
-      const deviceVersion = document.createElement("div");
-      deviceVersion.className = "device-version";
-      deviceVersion.textContent = formatVersion(device.currentVersion);
-      left.appendChild(deviceName);
-      left.appendChild(deviceVersion);
-      const pill = document.createElement("span");
-      pill.className = "device-pill";
-      pill.textContent = STATUS_LABEL[device.status] || STATUS_LABEL.unknown;
-      row.appendChild(left);
-      row.appendChild(pill);
-      customerCard.appendChild(row);
-    }
-
-    if (customer.devices.length > 3) {
-      const more = document.createElement("div");
-      more.className = "more-devices";
-      more.textContent = `+${customer.devices.length - 3} weitere Geräte`;
-      customerCard.appendChild(more);
-    }
-
-    customerGrid.appendChild(customerCard);
+  if (outdatedCount > 0) {
+    const upd = document.createElement("span");
+    upd.className = "prod-section-updates";
+    upd.textContent = `${outdatedCount} Update${outdatedCount !== 1 ? "s" : ""}`;
+    right.appendChild(upd);
   }
 
-  card.appendChild(title);
-  card.appendChild(badge);
-  card.appendChild(version);
-  card.appendChild(summary);
+  const cnt = document.createElement("span");
+  cnt.className = "prod-section-count";
+  cnt.textContent = `${totalDevices} Gerät${totalDevices !== 1 ? "e" : ""}`;
+  right.appendChild(cnt);
+
+  header.appendChild(left);
+  header.appendChild(right);
+
+  // Build display rows for table
+  const sortedCustomers = product.customers
+    .map(c => ({
+      ...c,
+      filtered: c.devices.filter(d => d.status === "update-available" || d.status === "major-update"),
+      outdatedCount: c.devices.filter(d => d.status === "update-available" || d.status === "major-update").length,
+    }))
+    .filter(c => c.filtered.length > 0)
+    .sort((a, b) => b.outdatedCount - a.outdatedCount || a.name.localeCompare(b.name, "de"));
+
+  const rows = [];
+  for (const c of sortedCustomers) {
+    rows.push({ kind: "header", id: c.id, name: c.name, outdated: c.outdatedCount, total: c.devices.length });
+    c.filtered.forEach(d => rows.push({ kind: "device", customerId: c.id, device: d }));
+  }
+
+  // Table body (hidden when collapsed)
+  const tableWrap = buildTableSection({ rows, hasCustomerCol: true, onHeightChange: sendHeight });
+  tableWrap.style.display = isExpanded ? "" : "none";
+
+  header.addEventListener("click", () => {
+    isExpanded = !isExpanded;
+    arrow.textContent = isExpanded ? "▾" : "▸";
+    tableWrap.style.display = isExpanded ? "" : "none";
+    sendHeight();
+  });
+
+  section.appendChild(header);
+  if (rows.length > 0) section.appendChild(tableWrap);
   if (product.error) setError(product.error);
-  if (customers.length > 0) card.appendChild(customerGrid);
-  return card;
+  return section;
 }
 
 function renderSoftware(products) {
@@ -339,6 +539,12 @@ function renderCustomers(customers) {
 
 // ── Render: Kunden detail ──────────────────────────────────────────────────────
 
+function sourceLabel(source) {
+  if (source === "ninjaone") return "NinjaOne";
+  if (source === "unifi") return "UniFi";
+  return "Sophos";
+}
+
 function renderCustomerDetail(detail) {
   elements.content.innerHTML = "";
 
@@ -374,7 +580,7 @@ function renderCustomerDetail(detail) {
   header.appendChild(summaryEl);
   elements.content.appendChild(header);
 
-  // Products
+  // Products as collapsible table sections
   if (detail.products.length > 0) {
     const sectionLabel = document.createElement("div");
     sectionLabel.className = "detail-section-label";
@@ -387,80 +593,87 @@ function renderCustomerDetail(detail) {
       return bOut - aOut || a.productName.localeCompare(b.productName, "de");
     });
 
-    const productGrid = document.createElement("div");
-    productGrid.className = "detail-product-grid";
-
     for (const product of sortedProducts) {
       const outdated = product.devices.filter(d => d.status === "update-available" || d.status === "major-update").length;
       const hasMajor = product.devices.some(d => d.status === "major-update");
-      const borderColor = outdated > 0 ? (hasMajor ? "#7f1d1d" : "#78350f") : "#1e2d3d";
 
-      const card = document.createElement("div");
-      card.className = "detail-product-card";
-      card.style.borderLeftColor = borderColor;
+      const section = document.createElement("div");
+      section.className = "prod-section" + (outdated > 0 ? " has-updates" : "");
+      if (hasMajor) section.style.borderColor = "rgba(127,29,29,0.5)";
 
-      const cardTop = document.createElement("div");
-      cardTop.className = "detail-product-top";
+      // Section header
+      let isExpanded = outdated > 0;
+      const secHeader = document.createElement("div");
+      secHeader.className = "prod-section-header";
 
-      const productName = document.createElement("div");
-      productName.className = "detail-product-name";
-      productName.textContent = product.productName;
-      cardTop.appendChild(productName);
+      const secLeft = document.createElement("div");
+      secLeft.className = "prod-section-left";
+
+      const arrow = document.createElement("span");
+      arrow.className = "prod-section-arrow";
+      arrow.textContent = isExpanded ? "▾" : "▸";
+
+      const pName = document.createElement("span");
+      pName.className = "prod-section-name";
+      pName.textContent = product.productName;
+
+      secLeft.appendChild(arrow);
+      secLeft.appendChild(pName);
 
       if (product.latestVersion) {
-        const ver = document.createElement("div");
-        ver.className = "detail-product-version";
+        const ver = document.createElement("span");
+        ver.className = "prod-section-ver";
         if (product.releaseUrl) {
-          const link = document.createElement("a");
-          link.href = product.releaseUrl;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-          link.textContent = formatVersion(product.latestVersion);
-          link.style.color = "#60a5fa";
-          link.style.textDecoration = "none";
-          ver.appendChild(link);
+          const a = document.createElement("a");
+          a.href = product.releaseUrl;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = formatVersion(product.latestVersion);
+          a.addEventListener("click", e => e.stopPropagation());
+          ver.appendChild(a);
         } else {
           ver.textContent = formatVersion(product.latestVersion);
         }
-        cardTop.appendChild(ver);
+        secLeft.appendChild(ver);
       }
 
-      card.appendChild(cardTop);
-
-      for (const device of product.devices) {
-        const sc = STATUS_COLOR[device.status] || STATUS_COLOR.unknown;
-        const row = document.createElement("div");
-        row.className = "detail-device-row";
-
-        const left = document.createElement("div");
-        const dName = document.createElement("div");
-        dName.className = "device-name";
-        dName.textContent = device.name;
-        const dVer = document.createElement("div");
-        dVer.className = "device-version";
-        if (device.status !== "up-to-date" && device.latestVersion && device.latestVersion !== device.currentVersion) {
-          dVer.textContent = `${formatVersion(device.currentVersion)} → ${formatVersion(device.latestVersion)}`;
-        } else {
-          dVer.textContent = formatVersion(device.currentVersion);
-        }
-        left.appendChild(dName);
-        left.appendChild(dVer);
-
-        const pill = document.createElement("span");
-        pill.className = "device-pill";
-        pill.style.backgroundColor = sc.bg;
-        pill.style.color = sc.color;
-        pill.textContent = STATUS_LABEL[device.status] || STATUS_LABEL.unknown;
-
-        row.appendChild(left);
-        row.appendChild(pill);
-        card.appendChild(row);
+      const secRight = document.createElement("div");
+      secRight.className = "prod-section-right";
+      if (outdated > 0) {
+        const upd = document.createElement("span");
+        upd.className = "prod-section-updates";
+        upd.textContent = `${outdated} Update${outdated !== 1 ? "s" : ""}`;
+        secRight.appendChild(upd);
       }
+      const cnt = document.createElement("span");
+      cnt.className = "prod-section-count";
+      cnt.textContent = `${product.devices.length} Gerät${product.devices.length !== 1 ? "e" : ""}`;
+      secRight.appendChild(cnt);
 
-      productGrid.appendChild(card);
+      secHeader.appendChild(secLeft);
+      secHeader.appendChild(secRight);
+
+      // Table (Gerät | Quelle | Installiert | Aktuell | Status)
+      const rows = product.devices.map(d => ({
+        kind: "device",
+        device: d,
+        source: sourceLabel(d.source),
+      }));
+
+      const tableWrap = buildTableSection({ rows, hasCustomerCol: false, onHeightChange: sendHeight });
+      tableWrap.style.display = isExpanded ? "" : "none";
+
+      secHeader.addEventListener("click", () => {
+        isExpanded = !isExpanded;
+        arrow.textContent = isExpanded ? "▾" : "▸";
+        tableWrap.style.display = isExpanded ? "" : "none";
+        sendHeight();
+      });
+
+      section.appendChild(secHeader);
+      section.appendChild(tableWrap);
+      elements.content.appendChild(section);
     }
-
-    elements.content.appendChild(productGrid);
   } else {
     const empty = document.createElement("p");
     empty.style.cssText = "color:#64748b;font-size:13px;margin:4px 0 16px;";

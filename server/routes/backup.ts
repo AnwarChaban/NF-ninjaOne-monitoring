@@ -7,6 +7,7 @@ import {
   getAllBackupChecks,
   getAllBackupAccounts,
 } from '../services/backup-checker';
+import { fetchEmailsFromSender } from '../services/graph-mail';
 
 const router = Router();
 
@@ -217,6 +218,74 @@ router.put('/admin/backup-checks/:id', (req, res) => {
 router.delete('/admin/backup-checks/:id', (req, res) => {
   getDb().prepare('DELETE FROM backup_checks WHERE id = ?').run(parseInt(req.params.id));
   res.json({ ok: true });
+});
+
+// Recent emails for a backup account — used to auto-fill new check form
+router.get('/admin/backup-accounts/:id/recent-emails', async (req, res) => {
+  if (!isGraphConfigured()) {
+    res.status(503).json({ error: 'Graph API nicht konfiguriert' });
+    return;
+  }
+  const account = getDb()
+    .prepare('SELECT * FROM backup_accounts WHERE id = ?')
+    .get(parseInt(req.params.id)) as { from_email: string } | undefined;
+  if (!account) { res.status(404).json({ error: 'Account nicht gefunden' }); return; }
+
+  const hours = Math.min(parseInt(String(req.query.hours ?? '720')) || 720, 720);
+  const sinceDays = Math.ceil(hours / 24);
+
+  try {
+    const emails = await fetchEmailsFromSender(account.from_email, sinceDays);
+
+    // Filter to requested time window
+    const since = Date.now() - hours * 3_600_000;
+    const filtered = emails.filter(e => new Date(e.receivedAt).getTime() >= since);
+
+    // Group by subject → unique jobs
+    const jobMap = new Map<string, { subject: string; count: number; lastReceivedAt: string; bodyPreview: string }>();
+    for (const email of filtered) {
+      const existing = jobMap.get(email.subject);
+      if (!existing) {
+        jobMap.set(email.subject, { subject: email.subject, count: 1, lastReceivedAt: email.receivedAt, bodyPreview: email.bodyPreview });
+      } else {
+        existing.count++;
+        if (new Date(email.receivedAt) > new Date(existing.lastReceivedAt)) {
+          existing.lastReceivedAt = email.receivedAt;
+        }
+      }
+    }
+
+    const jobs = Array.from(jobMap.values()).sort((a, b) => b.count - a.count);
+
+    // Auto-detect interval from ALL email timestamps per subject
+    function detectInterval(subject: string): number {
+      const times = emails
+        .filter(e => e.subject === subject)
+        .map(e => new Date(e.receivedAt).getTime())
+        .sort((a, b) => b - a);
+      if (times.length < 2) return 24;
+      const gaps = times.slice(0, -1).map((t, i) => (t - times[i + 1]) / 3_600_000).filter(g => g > 0);
+      if (gaps.length === 0) return 24;
+      const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+      const nice = [1, 2, 4, 6, 8, 12, 24, 48, 72, 168];
+      return nice.reduce((prev, curr) => Math.abs(curr - median) < Math.abs(prev - median) ? curr : prev);
+    }
+
+    const jobsWithInterval = jobs.map(j => ({ ...j, suggestedInterval: detectInterval(j.subject) }));
+
+    // Overall suggested interval (for single-form use)
+    const globalInterval = jobsWithInterval.length > 0
+      ? jobsWithInterval[0].suggestedInterval
+      : 24;
+
+    res.json({
+      emails: emails.slice(0, 5),
+      jobs: jobsWithInterval,
+      suggestedInterval: globalInterval,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 export default router;
