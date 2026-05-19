@@ -1,5 +1,5 @@
 
-type View = 'versions' | 'backup';
+type View = 'versions' | 'sophos' | 'backup';
 
 interface SidebarProps {
   activeView: View;
@@ -7,6 +7,7 @@ interface SidebarProps {
 
 const navItems: { view: View; label: string; hash: string; icon: string }[] = [
   { view: 'versions', label: 'Versionen', hash: '#/', icon: '📦' },
+  { view: 'sophos', label: 'Sophos', hash: '#/sophos', icon: '🔥' },
   { view: 'backup', label: 'Backup', hash: '#/backup', icon: '💾' },
 ];
 

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getDb } from '../db';
 import { config } from '../config';
-import { isNinjaOneConfigured } from '../services/runtime-settings';
+import { isNinjaOneConfigured, isSophosConfigured } from '../services/runtime-settings';
 
 const router = Router();
 
@@ -12,9 +12,11 @@ const ALLOWED_SETTINGS_KEYS = new Set([
   'unifiApiKey',
   'unifiClientId',
   'unifiClientSecret',
-  'sophosApiKey',
+  'sophosTokenUrl',
   'sophosClientId',
   'sophosClientSecret',
+  'sophosPartnerId',
+  'sophosScope',
   'graphTenantId',
   'graphClientId',
   'graphClientSecret',
@@ -31,9 +33,11 @@ router.get('/settings', (_req, res) => {
     unifiApiKey: '',
     unifiClientId: '',
     unifiClientSecret: '',
-    sophosApiKey: '',
-    sophosClientId: '',
-    sophosClientSecret: '',
+    sophosTokenUrl: config.sophos.tokenUrl || '',
+    sophosClientId: config.sophos.clientId || '',
+    sophosClientSecret: config.sophos.clientSecret || '',
+    sophosPartnerId: config.sophos.partnerId || '',
+    sophosScope: config.sophos.scope || 'token',
     graphTenantId: config.graph.tenantId || '',
     graphClientId: config.graph.clientId || '',
     graphClientSecret: config.graph.clientSecret || '',
@@ -48,6 +52,7 @@ router.get('/settings', (_req, res) => {
     }
   }
   settings.mockMode = isNinjaOneConfigured() ? 'false' : 'true';
+  settings.sophosConfigured = isSophosConfigured() ? 'true' : 'false';
   res.json(settings);
 });
 

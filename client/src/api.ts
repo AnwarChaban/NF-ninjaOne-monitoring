@@ -277,6 +277,101 @@ export async function deleteUnifiMapping(id: number): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete UniFi mapping');
 }
 
+export interface SophosFirewallStatus {
+  id: number;
+  name: string;
+  hostname: string;
+  currentVersion: string;
+  latestVersion?: string;
+  status: 'up-to-date' | 'update-available' | 'major-update' | 'unknown';
+}
+
+export interface SophosCustomerOverview {
+  customerId: number;
+  customerName: string;
+  tenantId: string;
+  latestVersion: string;
+  releaseUrl: string;
+  firewalls: SophosFirewallStatus[];
+}
+
+export async function fetchSophosOverview(): Promise<SophosCustomerOverview[]> {
+  const res = await fetch(`${BASE}/sophos/overview`);
+  if (!res.ok) throw new Error('Failed to fetch Sophos overview');
+  return res.json();
+}
+
+export interface SophosTenantEntry {
+  id: number;
+  customerId: number;
+  customerName: string;
+  tenantId: string;
+  name: string;
+  devices: Array<{ id: number; name: string; hostname: string; currentVersion: string }>;
+}
+
+export async function fetchSophosTenants(): Promise<SophosTenantEntry[]> {
+  const res = await fetch(`${BASE}/admin/sophos/tenants`);
+  if (!res.ok) throw new Error('Failed to fetch Sophos tenants');
+  return res.json();
+}
+
+export async function createSophosAccount(customerId: number, data: { sophosCustomerId: string; name: string }): Promise<void> {
+  const res = await fetch(`${BASE}/admin/customers/${customerId}/sophos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to create Sophos account');
+}
+
+export async function deleteSophosAccount(customerId: number): Promise<void> {
+  const res = await fetch(`${BASE}/admin/customers/${customerId}/sophos`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete Sophos account');
+}
+
+export interface SophosUnmatchedTenant {
+  id: number;
+  tenantId: string;
+  tenantName: string;
+  syncedAt: string;
+}
+
+export interface SophosApiTenant {
+  id: string;
+  name: string;
+}
+
+export async function fetchSophosUnmatchedTenants(): Promise<SophosUnmatchedTenant[]> {
+  const res = await fetch(`${BASE}/admin/sophos/unmatched-tenants`);
+  if (!res.ok) throw new Error('Failed to fetch unmatched Sophos tenants');
+  return res.json();
+}
+
+export async function fetchSophosApiTenants(): Promise<SophosApiTenant[]> {
+  const res = await fetch(`${BASE}/admin/sophos/api-tenants`);
+  if (!res.ok) return throwApiError(res, 'Failed to fetch Sophos API tenants');
+  return res.json();
+}
+
+export async function assignSophosTenant(data: { customerId: number; tenantId: string; tenantName: string }): Promise<void> {
+  const res = await fetch(`${BASE}/admin/sophos/assign-tenant`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to assign Sophos tenant');
+}
+
+export async function triggerSophosSync(): Promise<{ ok: boolean; tenants: number; devices: number; unmatched: number }> {
+  const res = await fetch(`${BASE}/admin/sophos/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to sync Sophos data');
+  return res.json();
+}
+
 export async function fetchUnifiUnmatchedHosts(): Promise<UnifiUnmatchedHost[]> {
   const res = await fetch(`${BASE}/admin/unifi/unmatched-hosts`);
   if (!res.ok) throw new Error('Failed to fetch unmatched UniFi hosts');

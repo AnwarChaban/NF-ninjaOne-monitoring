@@ -89,3 +89,26 @@ export function isGraphConfigured(): boolean {
 export function getBackupMailbox(): string {
   return getSettingOrFallback('backupMailbox', config.backupMailbox);
 }
+
+export interface SophosRuntimeConfig {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  partnerId: string;
+  scope: string;
+}
+
+export function getSophosRuntimeConfig(): SophosRuntimeConfig {
+  return {
+    tokenUrl: getSettingOrFallback('sophosTokenUrl', config.sophos.tokenUrl),
+    clientId: getSettingOrFallback('sophosClientId', config.sophos.clientId),
+    clientSecret: getSettingOrFallback('sophosClientSecret', config.sophos.clientSecret),
+    partnerId: getSettingOrFallback('sophosPartnerId', config.sophos.partnerId),
+    scope: getSettingOrFallback('sophosScope', config.sophos.scope),
+  };
+}
+
+export function isSophosConfigured(): boolean {
+  const cfg = getSophosRuntimeConfig();
+  return !!(cfg.tokenUrl && cfg.clientId && cfg.clientSecret && cfg.partnerId);
+}

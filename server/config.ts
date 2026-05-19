@@ -21,6 +21,16 @@ export const config = {
     clientSecret: process.env.UNIFI_CLIENT_SECRET || '',
   },
 
+  sophos: {
+    tokenUrl: process.env.SOPHOS_TOKEN_URL || '',
+    clientId: process.env.SOPHOS_CLIENT_ID || '',
+    clientSecret: process.env.SOPHOS_CLIENT_SECRET || '',
+    partnerId: process.env.SOPHOS_PARTNER_ID || '',
+    scope: process.env.SOPHOS_SCOPE || 'token',
+  },
+
+  sophosSyncCron: process.env.SOPHOS_SYNC_CRON || '0 3 * * *',
+
   graph: {
     tenantId: process.env.GRAPH_TENANT_ID || '',
     clientId: process.env.GRAPH_CLIENT_ID || '',

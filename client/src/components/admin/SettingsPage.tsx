@@ -37,9 +37,11 @@ export default function SettingsPage() {
   const [unifiApiKey, setUnifiApiKey] = useState('');
   const [unifiClientId, setUnifiClientId] = useState('');
   const [unifiClientSecret, setUnifiClientSecret] = useState('');
-  const [sophosApiKey, setSophosApiKey] = useState('');
+  const [sophosTokenUrl, setSophosTokenUrl] = useState('');
   const [sophosClientId, setSophosClientId] = useState('');
   const [sophosClientSecret, setSophosClientSecret] = useState('');
+  const [sophosPartnerId, setSophosPartnerId] = useState('');
+  const [sophosScope, setSophosScope] = useState('');
   const [graphTokenUrl, setGraphTokenUrl] = useState('');
   const [graphClientId, setGraphClientId] = useState('');
   const [graphClientSecret, setGraphClientSecret] = useState('');
@@ -55,9 +57,11 @@ export default function SettingsPage() {
     setUnifiApiKey(s.unifiApiKey || '');
     setUnifiClientId(s.unifiClientId || '');
     setUnifiClientSecret(s.unifiClientSecret || '');
-    setSophosApiKey(s.sophosApiKey || '');
+    setSophosTokenUrl(s.sophosTokenUrl || '');
     setSophosClientId(s.sophosClientId || '');
     setSophosClientSecret(s.sophosClientSecret || '');
+    setSophosPartnerId(s.sophosPartnerId || '');
+    setSophosScope(s.sophosScope || 'token');
     const tenantId = s.graphTenantId || '';
     setGraphTokenUrl(tenantId
       ? `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`
@@ -78,9 +82,11 @@ export default function SettingsPage() {
       unifiApiKey,
       unifiClientId,
       unifiClientSecret,
-      sophosApiKey,
+      sophosTokenUrl,
       sophosClientId,
       sophosClientSecret,
+      sophosPartnerId,
+      sophosScope,
       graphTenantId: extractTenantId(graphTokenUrl),
       graphClientId,
       graphClientSecret,
@@ -135,19 +141,45 @@ export default function SettingsPage() {
 
         <div style={cardStyle}>
           <h3 style={sectionTitleStyle}>Sophos</h3>
-          <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>API Key (optional)</label>
-            <input style={inputStyle} type="password" placeholder="Sophos API Key" value={sophosApiKey} onChange={e => setSophosApiKey(e.target.value)} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>Client ID</label>
-              <input style={inputStyle} placeholder="Client ID" value={sophosClientId} onChange={e => setSophosClientId(e.target.value)} />
+          <div style={{ display: 'grid', rowGap: '10px' }}>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 500 }}>Grant type</span>
+              <span style={{ padding: '8px 12px', backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', color: '#64748b', fontSize: '13px', fontFamily: 'monospace' }}>
+                Client Credentials
+              </span>
             </div>
-            <div>
-              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>Client Secret</label>
-              <input style={inputStyle} type="password" placeholder="Client Secret" value={sophosClientSecret} onChange={e => setSophosClientSecret(e.target.value)} />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Access Token URL</span>
+              <input
+                style={inputStyle}
+                placeholder="https://id.sophos.com/api/v2/oauth2/token"
+                value={sophosTokenUrl}
+                onChange={e => setSophosTokenUrl(e.target.value)}
+              />
             </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Client ID</span>
+              <input style={inputStyle} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value={sophosClientId} onChange={e => setSophosClientId(e.target.value)} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Client Secret</span>
+              <input style={inputStyle} type="password" placeholder="••••••••••••••••••••" value={sophosClientSecret} onChange={e => setSophosClientSecret(e.target.value)} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Partner ID</span>
+              <input style={inputStyle} placeholder="X-Partner-ID" value={sophosPartnerId} onChange={e => setSophosPartnerId(e.target.value)} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500 }}>Scope</span>
+              <input style={inputStyle} placeholder="token" value={sophosScope} onChange={e => setSophosScope(e.target.value)} />
+            </div>
+
           </div>
         </div>
 

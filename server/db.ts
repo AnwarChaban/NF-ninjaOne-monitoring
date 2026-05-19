@@ -116,11 +116,19 @@ function initDb() {
       product_id TEXT NOT NULL,
       external_device_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      hostname TEXT NOT NULL DEFAULT '',
       current_version TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (sophos_customer_id) REFERENCES sophos_customers(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS sophos_unmatched_tenants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT NOT NULL UNIQUE,
+      tenant_name TEXT NOT NULL,
+      synced_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS unifi_customer_mappings (
@@ -247,6 +255,13 @@ function createIndexes() {
     CREATE INDEX IF NOT EXISTS idx_sophos_devices_customer ON sophos_devices(sophos_customer_id);
     CREATE INDEX IF NOT EXISTS idx_sophos_devices_product ON sophos_devices(product_id);
   `);
+
+  // Add hostname column to sophos_devices if it doesn't exist yet
+  const sophosDeviceCols = db.prepare('PRAGMA table_info(sophos_devices)').all() as Array<{ name: string }>;
+  if (sophosDeviceCols.length > 0 && !sophosDeviceCols.some(c => c.name === 'hostname')) {
+    db.exec(`ALTER TABLE sophos_devices ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`);
+    console.log('[DB] Migrated sophos_devices: added hostname column');
+  }
 }
 
 function migrateFromOldSchema() {

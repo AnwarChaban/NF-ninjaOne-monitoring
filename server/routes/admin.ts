@@ -7,9 +7,10 @@ import {
   getLatestVersion,
   storeProductVersion,
 } from '../services/products';
-import { isNinjaOneConfigured, isUnifiConfigured } from '../services/runtime-settings';
+import { isNinjaOneConfigured, isUnifiConfigured, isSophosConfigured } from '../services/runtime-settings';
 import { syncNinjaOneData, fetchNinjaOneBackups } from '../services/ninjaone';
 import { syncUnifiData } from '../services/unifi';
+import { syncSophosData, fetchTenantsFromApi } from '../services/sophos';
 import { productNames } from '../services/version-fetcher';
 
 const router = Router();
@@ -571,6 +572,104 @@ router.post('/admin/unifi/sync', async (_req, res) => {
 
   try {
     const result = await syncUnifiData();
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// --- Sophos Tenants ---
+
+router.get('/admin/sophos/tenants', (_req, res) => {
+  const db = getDb();
+  const tenants = db.prepare(`
+    SELECT sc.id, sc.customer_id as customerId, sc.sophos_customer_id as tenantId,
+           sc.name, c.name as customerName
+    FROM sophos_customers sc
+    JOIN customers c ON sc.customer_id = c.id
+    ORDER BY c.name
+  `).all() as Array<{ id: number; customerId: number; tenantId: string; name: string; customerName: string }>;
+
+  const result = tenants.map(t => {
+    const devices = db.prepare(`
+      SELECT id, name, hostname, current_version as currentVersion
+      FROM sophos_devices
+      WHERE sophos_customer_id = ?
+      ORDER BY name
+    `).all(t.id) as Array<{ id: number; name: string; hostname: string; currentVersion: string }>;
+    return { ...t, devices };
+  });
+
+  res.json(result);
+});
+
+router.delete('/admin/customers/:id/sophos', (req, res) => {
+  const db = getDb();
+  db.prepare('DELETE FROM sophos_customers WHERE customer_id = ?').run(parseInt(req.params.id));
+  res.json({ ok: true });
+});
+
+router.get('/admin/sophos/unmatched-tenants', (_req, res) => {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT id, tenant_id as tenantId, tenant_name as tenantName, synced_at as syncedAt
+    FROM sophos_unmatched_tenants
+    ORDER BY tenant_name
+  `).all();
+  res.json(rows);
+});
+
+router.post('/admin/sophos/assign-tenant', (req, res) => {
+  const db = getDb();
+  const { customerId, tenantId, tenantName } = req.body as {
+    customerId?: number; tenantId?: string; tenantName?: string;
+  };
+
+  if (!customerId || !tenantId || !tenantName) {
+    res.status(400).json({ error: 'customerId, tenantId und tenantName sind erforderlich' });
+    return;
+  }
+
+  const customer = db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId);
+  if (!customer) {
+    res.status(404).json({ error: 'Kunde nicht gefunden' });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  try {
+    db.prepare('INSERT INTO sophos_customers (customer_id, sophos_customer_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(customerId, tenantId, tenantName, now, now);
+    db.prepare('DELETE FROM sophos_unmatched_tenants WHERE tenant_id = ?').run(tenantId);
+    res.json({ ok: true });
+  } catch {
+    res.status(409).json({ error: 'Tenant oder Kunde bereits verknüpft' });
+  }
+});
+
+router.get('/admin/sophos/api-tenants', async (_req, res) => {
+  if (!isSophosConfigured()) {
+    res.status(400).json({ error: 'Sophos ist nicht konfiguriert' });
+    return;
+  }
+  try {
+    const tenants = await fetchTenantsFromApi();
+    res.json(tenants);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// --- Sophos Sync ---
+
+router.post('/admin/sophos/sync', async (_req, res) => {
+  if (!isSophosConfigured()) {
+    res.status(400).json({ error: 'Sophos ist nicht konfiguriert' });
+    return;
+  }
+
+  try {
+    const result = await syncSophosData();
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });

@@ -3,12 +3,14 @@ import CustomersPage from './admin/CustomersPage';
 import ProductsPage from './admin/ProductsPage';
 import SettingsPage from './admin/SettingsPage';
 import BackupChecksPage from './admin/BackupChecksPage';
+import SophosPage from './admin/SophosPage';
 
-type AdminTab = 'customers' | 'products' | 'backup-checks' | 'settings';
+type AdminTab = 'customers' | 'products' | 'sophos' | 'backup-checks' | 'settings';
 
 const tabs: { key: AdminTab; label: string }[] = [
   { key: 'customers', label: 'Kunden' },
   { key: 'products', label: 'Produkte' },
+  { key: 'sophos', label: 'Sophos' },
   { key: 'backup-checks', label: 'Backup-Checks' },
   { key: 'settings', label: 'Einstellungen' },
 ];
@@ -66,6 +68,7 @@ export default function AdminLayout() {
       <main style={{ flex: 1, padding: '32px 40px', overflow: 'auto' }}>
         {activeTab === 'customers' && <CustomersPage />}
         {activeTab === 'products' && <ProductsPage />}
+        {activeTab === 'sophos' && <SophosPage />}
         {activeTab === 'backup-checks' && <BackupChecksPage />}
         {activeTab === 'settings' && <SettingsPage />}
       </main>

@@ -13,10 +13,11 @@ import customersRouter from './routes/customers';
 import { fetchAllLatestVersions } from './services/version-fetcher';
 import { compareVersions } from './services/comparator';
 import { sendNotifications, type UpdateNotification } from './services/notifier';
-import { isNinjaOneConfigured, isGraphConfigured } from './services/runtime-settings';
+import { isNinjaOneConfigured, isGraphConfigured, isSophosConfigured } from './services/runtime-settings';
 import { getAllDevicesByProduct } from './services/customers';
 import { syncBackupEmails } from './services/backup-checker';
 import { syncNinjaOneData } from './services/ninjaone';
+import { syncSophosData } from './services/sophos';
 
 const app = express();
 
@@ -96,6 +97,18 @@ cron.schedule(config.ninjaSyncCron, async () => {
   }
 });
 console.log(`[Scheduler] NinjaOne sync cron scheduled: ${config.ninjaSyncCron}`);
+
+cron.schedule(config.sophosSyncCron, async () => {
+  if (!isSophosConfigured()) return;
+  console.log(`[Scheduler] Running Sophos sync at ${new Date().toISOString()}`);
+  try {
+    const result = await syncSophosData();
+    console.log(`[Scheduler] Sophos sync complete. ${result.tenants} tenant(s), ${result.devices} device(s).`);
+  } catch (error) {
+    console.error('[Scheduler] Sophos sync failed:', error);
+  }
+});
+console.log(`[Scheduler] Sophos sync cron scheduled: ${config.sophosSyncCron}`);
 
 // Start server
 app.listen(config.port, () => {

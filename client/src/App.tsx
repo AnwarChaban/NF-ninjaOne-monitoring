@@ -6,6 +6,7 @@ import Sidebar from './components/Sidebar';
 import BackupDashboard from './components/BackupDashboard';
 import CustomerOverview from './components/CustomerOverview';
 import CustomerDetailPage from './components/CustomerDetailPage';
+import SophosDashboard from './components/SophosDashboard';
 
 type GroupBy = 'software' | 'kunde';
 
@@ -234,21 +235,25 @@ export default function App() {
   const hash = useHash();
   const isAdmin = hash.startsWith('#/admin');
   const isBackup = hash.startsWith('#/backup');
+  const isSophos = hash.startsWith('#/sophos');
 
   if (isAdmin) return <AdminLayout />;
 
   const customerDetailMatch = hash.match(/^#\/customers\/(\d+)$/);
   const customerDetailId = customerDetailMatch ? parseInt(customerDetailMatch[1]) : null;
 
+  const activeView = isBackup ? 'backup' : isSophos ? 'sophos' : 'versions';
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar activeView={isBackup ? 'backup' : 'versions'} />
+      <Sidebar activeView={activeView} />
       <main style={{ flex: 1, overflowY: 'auto' }}>
         {isBackup && <BackupDashboard />}
-        {!isBackup && customerDetailId !== null && (
+        {isSophos && <SophosDashboard />}
+        {!isBackup && !isSophos && customerDetailId !== null && (
           <CustomerDetailPage customerId={customerDetailId} />
         )}
-        {!isBackup && customerDetailId === null && <Dashboard />}
+        {!isBackup && !isSophos && customerDetailId === null && <Dashboard />}
       </main>
     </div>
   );

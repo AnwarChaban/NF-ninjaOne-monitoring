@@ -261,4 +261,47 @@ router.get('/customers/:id', (req, res) => {
   res.json(detail);
 });
 
+// GET /api/sophos/overview — all customers with Sophos firewalls + update status
+router.get('/sophos/overview', (_req, res) => {
+  const db = getDb();
+
+  const latest = getLatestVersion('sophos-firewall');
+  const latestVersion = latest?.version || '';
+  const releaseUrl = latest?.releaseUrl || '';
+
+  const tenants = db.prepare(`
+    SELECT sc.id, sc.sophos_customer_id as tenantId, sc.name as tenantName,
+           c.id as customerId, c.name as customerName
+    FROM sophos_customers sc
+    JOIN customers c ON sc.customer_id = c.id
+    ORDER BY c.name
+  `).all() as Array<{ id: number; tenantId: string; tenantName: string; customerId: number; customerName: string }>;
+
+  const result = tenants.map(t => {
+    const firewalls = (db.prepare(`
+      SELECT id, name, hostname, current_version as currentVersion
+      FROM sophos_devices
+      WHERE sophos_customer_id = ?
+      ORDER BY name
+    `).all(t.id) as Array<{ id: number; name: string; hostname: string; currentVersion: string }>).map(fw => ({
+      ...fw,
+      latestVersion: latestVersion || undefined,
+      status: (latestVersion
+        ? compareVersions(fw.currentVersion, latestVersion, 'sophos-firewall').status
+        : 'unknown') as UpdateStatus,
+    }));
+
+    return {
+      customerId: t.customerId,
+      customerName: t.customerName,
+      tenantId: t.tenantId,
+      latestVersion,
+      releaseUrl,
+      firewalls,
+    };
+  });
+
+  res.json(result);
+});
+
 export default router;
