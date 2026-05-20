@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(node -e ' *)",
+      "PowerShell($resp = Invoke-WebRequest -Uri \"http://localhost:3001/api/sophos/overview\" -UseBasicParsing; $j = $resp.Content | ConvertFrom-Json; $r = $j | Where-Object { $_.tenantId -eq \"f532b9fb-62af-4d76-b884-4527dc4406cb\" }; Write-Host \"customerName: $\\($r.customerName\\)\"; Write-Host \"alerts count: $\\($r.alerts.Count\\)\"; $r.alerts | Select-Object -First 2 | ConvertTo-Json)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Chaban\\\\OneDrive - Net Factory Gesellschaft für Netzwerklösungen mbH\\\\Dokumente\\\\Entwicklung\\\\version-Checker\" -Force)",
+      "Read(//c/Users/Chaban/OneDrive - Net Factory Gesellschaft f�r Netzwerkl�sungen mbH/Dokumente/Entwicklung/**)"
     ]
   }
 }

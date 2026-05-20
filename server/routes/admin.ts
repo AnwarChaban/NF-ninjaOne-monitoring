@@ -10,7 +10,7 @@ import {
 import { isNinjaOneConfigured, isUnifiConfigured, isSophosConfigured } from '../services/runtime-settings';
 import { syncNinjaOneData, fetchNinjaOneBackups } from '../services/ninjaone';
 import { syncUnifiData } from '../services/unifi';
-import { syncSophosData, fetchTenantsFromApi } from '../services/sophos';
+import { syncSophosData, syncSophosAlerts, fetchTenantsFromApi } from '../services/sophos';
 import { productNames } from '../services/version-fetcher';
 
 const router = Router();
@@ -670,6 +670,25 @@ router.post('/admin/sophos/sync', async (_req, res) => {
 
   try {
     const result = await syncSophosData();
+    // Also refresh alerts after device sync
+    const alertResult = await syncSophosAlerts().catch(err => {
+      console.error('[Sophos] Alert sync failed after device sync:', err);
+      return { total: 0 };
+    });
+    res.json({ ok: true, ...result, alerts: alertResult.total });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+router.post('/admin/sophos/sync-alerts', async (_req, res) => {
+  if (!isSophosConfigured()) {
+    res.status(400).json({ error: 'Sophos ist nicht konfiguriert' });
+    return;
+  }
+
+  try {
+    const result = await syncSophosAlerts();
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });

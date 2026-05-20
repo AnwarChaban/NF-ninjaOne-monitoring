@@ -154,7 +154,7 @@ export function getAllDevicesByProduct() {
   const sophosRows = db
     .prepare(`
       SELECT
-        sd.id, sd.name as deviceName, sd.product_id as productId, sd.current_version as currentVersion,
+        sd.id, sd.name as deviceName, sd.hostname, sd.product_id as productId, sd.current_version as currentVersion,
         sc.customer_id as customerId, c.name as customerName,
         'sophos' as source
       FROM sophos_devices sd

@@ -57,6 +57,8 @@ const navBtn = (disabled: boolean): React.CSSProperties => ({
   cursor: disabled ? 'default' : 'pointer',
 });
 
+const PRODUCTS_WITH_HOSTNAME = new Set(['sophos-firewall']);
+
 export default function ProductCard({
   product,
   showUpToDateDevices,
@@ -64,6 +66,7 @@ export default function ProductCard({
   product: ProductStatus;
   showUpToDateDevices: boolean;
 }) {
+  const showHostname = PRODUCTS_WITH_HOSTNAME.has(product.product);
   const outdated = getOutdatedCount(product);
   const [isExpanded, setIsExpanded] = useState(outdated > 0);
   const [page, setPage] = useState(0);
@@ -206,6 +209,7 @@ export default function ProductCard({
                 <thead>
                   <tr style={{ borderBottom: '1px solid #334155' }}>
                     <th style={{ ...thStyle, paddingLeft: '20px' }}>Kunde</th>
+                    {showHostname && <th style={thStyle}>Hostname</th>}
                     <th style={thStyle}>Gerät</th>
                     <th style={thStyle}>Installiert</th>
                     <th style={thStyle}>Aktuell</th>
@@ -226,7 +230,7 @@ export default function ProductCard({
                             borderBottom: '1px solid #1e293b',
                           }}
                         >
-                          <td colSpan={5} style={{ padding: '9px 20px' }}>
+                          <td colSpan={showHostname ? 6 : 5} style={{ padding: '9px 20px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <span style={{ color: '#64748b', fontSize: '17px', lineHeight: 1, width: '16px', flexShrink: 0 }}>
                                 {isCustomerExpanded ? '▾' : '▸'}
@@ -265,9 +269,15 @@ export default function ProductCard({
                     const { device, customerId } = row;
                     return (
                       <tr key={`device-${customerId}:${device.id}-${idx}`} style={{ borderBottom: '1px solid #0f172a' }}>
-                        <td style={{ padding: '8px 10px 8px 38px', color: '#334155', fontSize: '12px', width: '1%', whiteSpace: 'nowrap' }}>
-                          —
-                        </td>
+                        {showHostname ? (
+                          <td style={{ padding: '8px 10px 8px 20px', color: '#64748b', fontSize: '12px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                            {device.hostname || '—'}
+                          </td>
+                        ) : (
+                          <td style={{ padding: '8px 10px 8px 38px', color: '#334155', fontSize: '12px', width: '1%', whiteSpace: 'nowrap' }}>
+                            —
+                          </td>
+                        )}
                         <td style={{ padding: '8px 10px', color: '#e2e8f0', fontSize: '13px', fontWeight: 500 }}>
                           {formatDeviceName(device.name)}
                           {device.groupLabel && (

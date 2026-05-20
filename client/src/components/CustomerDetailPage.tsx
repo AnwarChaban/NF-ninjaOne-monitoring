@@ -35,7 +35,10 @@ const navBtn = (disabled: boolean): React.CSSProperties => ({
   cursor: disabled ? 'default' : 'pointer',
 });
 
+const PRODUCTS_WITH_HOSTNAME = new Set(['sophos-firewall']);
+
 function ProductTableSection({ product }: { product: CustomerProductDetail }) {
+  const showHostname = PRODUCTS_WITH_HOSTNAME.has(product.productId);
   const outdated = product.devices.filter(
     d => d.status === 'update-available' || d.status === 'major-update'
   ).length;
@@ -121,7 +124,8 @@ function ProductTableSection({ product }: { product: CustomerProductDetail }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #334155' }}>
-                <th style={{ ...thStyle, paddingLeft: '18px' }}>Gerät</th>
+                {showHostname && <th style={{ ...thStyle, paddingLeft: '18px' }}>Hostname</th>}
+                <th style={{ ...thStyle, paddingLeft: showHostname ? undefined : '18px' }}>Gerät</th>
                 <th style={thStyle}>Quelle</th>
                 <th style={thStyle}>Installiert</th>
                 <th style={thStyle}>Aktuell</th>
@@ -131,7 +135,12 @@ function ProductTableSection({ product }: { product: CustomerProductDetail }) {
             <tbody>
               {pageDevices.map(device => (
                 <tr key={device.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                  <td style={{ padding: '9px 10px 9px 18px', color: '#e2e8f0', fontSize: '13px', fontWeight: 500 }}>
+                  {showHostname && (
+                    <td style={{ padding: '9px 10px 9px 18px', color: '#64748b', fontSize: '12px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                      {device.hostname || '—'}
+                    </td>
+                  )}
+                  <td style={{ padding: showHostname ? '9px 10px' : '9px 10px 9px 18px', color: '#e2e8f0', fontSize: '13px', fontWeight: 500 }}>
                     {device.name}
                   </td>
                   <td style={{ padding: '9px 10px', fontSize: '12px', color: '#475569' }}>

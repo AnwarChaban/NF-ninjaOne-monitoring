@@ -54,6 +54,7 @@ router.get('/products', async (_req, res) => {
         customerMap.get(device.customerId)!.devices.push({
           id: device.id,
           name: device.deviceName || device.customerName,
+          hostname: device.hostname || undefined,
           currentVersion: device.currentVersion,
           latestVersion: latestVersion || undefined,
           status: comparison.status,

@@ -22,6 +22,7 @@ interface CustomerSummary {
 interface DeviceDetail {
   id: number;
   name: string;
+  hostname?: string;
   source: 'ninjaone' | 'unifi' | 'sophos';
   currentVersion: string;
   latestVersion?: string;
@@ -170,12 +171,12 @@ router.get('/customers/:id', (req, res) => {
     `).all(customerId, product.id) as Array<{ id: number; name: string; currentVersion: string }>;
 
     const sophosRows = db.prepare(`
-      SELECT sd.id, sd.name, sd.current_version as currentVersion
+      SELECT sd.id, sd.name, sd.hostname, sd.current_version as currentVersion
       FROM sophos_devices sd
       JOIN sophos_customers sc ON sd.sophos_customer_id = sc.id
       WHERE sc.customer_id = ? AND sd.product_id = ?
       ORDER BY sd.name
-    `).all(customerId, product.id) as Array<{ id: number; name: string; currentVersion: string }>;
+    `).all(customerId, product.id) as Array<{ id: number; name: string; hostname: string; currentVersion: string }>;
 
     const devices: DeviceDetail[] = [
       ...ninjaRows.map(d => ({
@@ -291,6 +292,16 @@ router.get('/sophos/overview', (_req, res) => {
         : 'unknown') as UpdateStatus,
     }));
 
+    const alerts = db.prepare(`
+      SELECT alert_id as alertId, category, description, severity, type, product, raised_at as raisedAt
+      FROM sophos_alerts
+      WHERE sophos_customer_id = ?
+      ORDER BY raised_at DESC
+    `).all(t.id) as Array<{
+      alertId: string; category: string; description: string;
+      severity: string; type: string; product: string; raisedAt: string;
+    }>;
+
     return {
       customerId: t.customerId,
       customerName: t.customerName,
@@ -298,6 +309,7 @@ router.get('/sophos/overview', (_req, res) => {
       latestVersion,
       releaseUrl,
       firewalls,
+      alerts,
     };
   });
 

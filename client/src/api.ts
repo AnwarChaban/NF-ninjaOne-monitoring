@@ -26,6 +26,7 @@ async function throwApiError(res: Response, fallbackMessage: string): Promise<ne
 export interface DeviceStatus {
   id: number;
   name: string;
+  hostname?: string;
   groupLabel?: string;
   currentVersion: string;
   latestVersion?: string;
@@ -286,6 +287,16 @@ export interface SophosFirewallStatus {
   status: 'up-to-date' | 'update-available' | 'major-update' | 'unknown';
 }
 
+export interface SophosAlert {
+  alertId: string;
+  category: string;
+  description: string;
+  severity: string;
+  type: string;
+  product: string;
+  raisedAt: string;
+}
+
 export interface SophosCustomerOverview {
   customerId: number;
   customerName: string;
@@ -293,6 +304,7 @@ export interface SophosCustomerOverview {
   latestVersion: string;
   releaseUrl: string;
   firewalls: SophosFirewallStatus[];
+  alerts: SophosAlert[];
 }
 
 export async function fetchSophosOverview(): Promise<SophosCustomerOverview[]> {
@@ -363,12 +375,21 @@ export async function assignSophosTenant(data: { customerId: number; tenantId: s
   if (!res.ok) return throwApiError(res, 'Failed to assign Sophos tenant');
 }
 
-export async function triggerSophosSync(): Promise<{ ok: boolean; tenants: number; devices: number; unmatched: number }> {
+export async function triggerSophosSync(): Promise<{ ok: boolean; tenants: number; devices: number; unmatched: number; alerts: number }> {
   const res = await fetch(`${BASE}/admin/sophos/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
   if (!res.ok) return throwApiError(res, 'Failed to sync Sophos data');
+  return res.json();
+}
+
+export async function triggerSophosAlertsSync(): Promise<{ ok: boolean; total: number }> {
+  const res = await fetch(`${BASE}/admin/sophos/sync-alerts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to sync Sophos alerts');
   return res.json();
 }
 
@@ -519,6 +540,7 @@ export interface CustomerSummary {
 export interface CustomerDeviceDetail {
   id: number;
   name: string;
+  hostname?: string;
   source: 'ninjaone' | 'unifi' | 'sophos';
   currentVersion: string;
   latestVersion?: string;

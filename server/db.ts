@@ -131,6 +131,20 @@ function initDb() {
       synced_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS sophos_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sophos_customer_id INTEGER NOT NULL,
+      alert_id TEXT NOT NULL UNIQUE,
+      category TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      severity TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT '',
+      product TEXT NOT NULL DEFAULT '',
+      raised_at TEXT NOT NULL DEFAULT '',
+      synced_at TEXT NOT NULL,
+      FOREIGN KEY (sophos_customer_id) REFERENCES sophos_customers(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS unifi_customer_mappings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       match_text TEXT NOT NULL UNIQUE,

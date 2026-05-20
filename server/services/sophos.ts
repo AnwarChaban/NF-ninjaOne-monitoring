@@ -38,8 +38,19 @@ function extractVersion(fw: SophosFirewall): string {
   return fw.product?.osVersion || fw.product?.version || '';
 }
 
+interface SophosAlert {
+  id: string;
+  category: string;
+  description: string;
+  severity: string;
+  type: string;
+  product: string;
+  raisedAt: string;
+}
+
 const TENANTS_API_URL = 'https://api.central.sophos.com/partner/v1/tenants';
 const FIREWALLS_API_URL = 'https://api-eu02.central.sophos.com/firewall/v1/firewalls';
+const ALERTS_API_URL = 'https://api-eu02.central.sophos.com/common/v1/alerts';
 
 async function getAccessToken(tokenUrl: string, clientId: string, clientSecret: string, scope: string): Promise<string> {
   const body = new URLSearchParams({
@@ -83,6 +94,37 @@ export async function fetchTenantsFromApi(): Promise<SophosTenant[]> {
 
   const data = await res.json() as { items?: SophosTenant[] };
   return data.items ?? [];
+}
+
+async function fetchAlerts(token: string, tenantId: string): Promise<SophosAlert[]> {
+  const alerts: SophosAlert[] = [];
+  let pageKey: string | undefined;
+
+  do {
+    const url = new URL(ALERTS_API_URL);
+    url.searchParams.set('pageSize', '100');
+    if (pageKey) url.searchParams.set('pageFromKey', pageKey);
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Tenant-ID': tenantId,
+      },
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Sophos alerts request failed for tenant ${tenantId} (${res.status}): ${text}`);
+    }
+
+    const data = await res.json() as { items?: SophosAlert[]; pages?: { nextKey?: string } };
+    for (const item of data.items ?? []) {
+      alerts.push(item);
+    }
+    pageKey = data.pages?.nextKey;
+  } while (pageKey);
+
+  return alerts;
 }
 
 async function fetchFirewalls(token: string, tenantId: string): Promise<SophosFirewall[]> {
@@ -244,4 +286,54 @@ export async function syncSophosData(): Promise<{ tenants: number; devices: numb
 
   console.log(`[Sophos] Sync complete. ${syncedTenants} tenant(s), ${syncedDevices} device(s), ${unmatchedCount} unmatched.`);
   return { tenants: syncedTenants, devices: syncedDevices, unmatched: unmatchedCount };
+}
+
+export async function syncSophosAlerts(): Promise<{ total: number }> {
+  const cfg = getSophosRuntimeConfig();
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const token = await getAccessToken(cfg.tokenUrl, cfg.clientId, cfg.clientSecret, cfg.scope);
+
+  const linkedTenants = db
+    .prepare('SELECT id, sophos_customer_id FROM sophos_customers')
+    .all() as Array<{ id: number; sophos_customer_id: string }>;
+
+  let total = 0;
+
+  for (const tenant of linkedTenants) {
+    let alerts: SophosAlert[];
+    try {
+      alerts = await fetchAlerts(token, tenant.sophos_customer_id);
+    } catch (error) {
+      console.error(`[Sophos] Failed to fetch alerts for tenant ${tenant.sophos_customer_id}:`, error);
+      continue;
+    }
+
+    db.prepare('DELETE FROM sophos_alerts WHERE sophos_customer_id = ?').run(tenant.id);
+
+    const insert = db.prepare(`
+      INSERT OR REPLACE INTO sophos_alerts
+        (sophos_customer_id, alert_id, category, description, severity, type, product, raised_at, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertMany = db.transaction((items: SophosAlert[]) => {
+      for (const a of items) {
+        insert.run(
+          tenant.id, a.id,
+          a.category || '', a.description || '', a.severity || '',
+          a.type || '', a.product || '', a.raisedAt || '',
+          now,
+        );
+      }
+    });
+
+    insertMany(alerts);
+    total += alerts.length;
+    console.log(`[Sophos] Synced ${alerts.length} alert(s) for tenant ${tenant.sophos_customer_id}`);
+  }
+
+  console.log(`[Sophos] Alerts sync complete. ${total} total alert(s).`);
+  return { total };
 }

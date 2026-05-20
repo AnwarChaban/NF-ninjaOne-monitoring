@@ -1,8 +1,64 @@
 import React, { useEffect, useState } from 'react';
-import { fetchSophosOverview, type SophosCustomerOverview } from '../api';
-import StatusBadge from './StatusBadge';
+import { fetchSophosOverview, type SophosCustomerOverview, type SophosAlert } from '../api';
 
 const REFRESH_INTERVAL = 60_000;
+
+function decodeHtml(text: string): string {
+  const txt = document.createElement('textarea');
+  txt.innerHTML = text;
+  return txt.value;
+}
+
+const SEVERITY_STYLES: Record<string, { color: string; bg: string; border: string; label: string; order: number }> = {
+  high:   { color: '#f87171', bg: '#7f1d1d30', border: '#f8717140', label: 'Hoch',    order: 0 },
+  medium: { color: '#fbbf24', bg: '#78350f30', border: '#fbbf2440', label: 'Mittel',  order: 1 },
+  low:    { color: '#94a3b8', bg: '#1e293b',   border: '#33415560', label: 'Niedrig', order: 2 },
+};
+
+function severityOrder(s: string) {
+  return SEVERITY_STYLES[s]?.order ?? 3;
+}
+
+function AlertRow({ alert }: { alert: SophosAlert }) {
+  const sev = SEVERITY_STYLES[alert.severity] ?? SEVERITY_STYLES.low;
+  const date = alert.raisedAt
+    ? new Date(alert.raisedAt).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
+    : '—';
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: '12px',
+      backgroundColor: sev.bg, border: `1px solid ${sev.border}`,
+      borderRadius: '8px', padding: '12px 14px',
+    }}>
+      <span style={{
+        flexShrink: 0, fontSize: '11px', fontWeight: 700,
+        color: sev.color, borderRadius: '4px',
+        padding: '2px 8px', marginTop: '1px',
+        minWidth: '52px', textAlign: 'center',
+        border: `1px solid ${sev.color}40`,
+      }}>
+        {sev.label}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ color: '#e2e8f0', fontSize: '13px', lineHeight: 1.5 }}>
+          {decodeHtml(alert.description)}
+        </div>
+        <div style={{ display: 'flex', gap: '14px', marginTop: '5px', flexWrap: 'wrap' }}>
+          {alert.category && (
+            <span style={{ color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              {alert.category}
+            </span>
+          )}
+          {alert.product && (
+            <span style={{ color: '#64748b', fontSize: '11px' }}>{alert.product}</span>
+          )}
+          <span style={{ color: '#475569', fontSize: '11px' }}>{date}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function SophosDashboard() {
   const [data, setData] = useState<SophosCustomerOverview[]>([]);
@@ -18,10 +74,11 @@ export default function SophosDashboard() {
       setLastUpdate(new Date());
       setError('');
 
-      // Auto-expand customers with outdated firewalls
+      // Auto-expand customers with high or medium alerts
       const autoExpand: Record<number, boolean> = {};
       result.forEach(c => {
-        if (c.firewalls.some(fw => fw.status === 'update-available' || fw.status === 'major-update')) {
+        const alerts = c.alerts ?? [];
+        if (alerts.some(a => a.severity === 'high' || a.severity === 'medium')) {
           autoExpand[c.customerId] = true;
         }
       });
@@ -43,50 +100,47 @@ export default function SophosDashboard() {
     setExpanded(prev => ({ ...prev, [customerId]: !prev[customerId] }));
   }
 
-  const totalFirewalls = data.reduce((s, c) => s + c.firewalls.length, 0);
-  const outdatedFirewalls = data.reduce(
-    (s, c) => s + c.firewalls.filter(fw => fw.status === 'update-available' || fw.status === 'major-update').length,
-    0
-  );
-  const latestVersion = data.find(c => c.latestVersion)?.latestVersion || '';
-  const releaseUrl = data.find(c => c.releaseUrl)?.releaseUrl || '';
+  // Only show customers that have alerts, sorted by highest severity first
+  const customersWithAlerts = data
+    .filter(c => (c.alerts ?? []).length > 0)
+    .sort((a, b) => {
+      const aMin = Math.min(...(a.alerts ?? []).map(x => severityOrder(x.severity)));
+      const bMin = Math.min(...(b.alerts ?? []).map(x => severityOrder(x.severity)));
+      if (aMin !== bMin) return aMin - bMin;
+      return (b.alerts ?? []).length - (a.alerts ?? []).length;
+    });
+
+  const totalAlerts = customersWithAlerts.reduce((s, c) => s + (c.alerts ?? []).length, 0);
+  const highCount  = customersWithAlerts.reduce((s, c) => s + (c.alerts ?? []).filter(a => a.severity === 'high').length, 0);
+  const medCount   = customersWithAlerts.reduce((s, c) => s + (c.alerts ?? []).filter(a => a.severity === 'medium').length, 0);
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '32px 16px' }}>
+    <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '32px 16px' }}>
       <header style={{ marginBottom: '28px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9', margin: 0 }}>
-              Sophos Firewall
+              Sophos Alerts
             </h1>
-            <p style={{ color: '#64748b', fontSize: '14px', marginTop: '6px' }}>
-              {totalFirewalls} Firewall{totalFirewalls !== 1 ? 's' : ''} überwacht
-              {outdatedFirewalls > 0 && (
-                <span style={{ color: '#fbbf24', marginLeft: '12px' }}>
-                  {outdatedFirewalls} Update{outdatedFirewalls !== 1 ? 's' : ''} verfügbar
+            <p style={{ color: '#64748b', fontSize: '14px', marginTop: '6px', margin: '6px 0 0' }}>
+              {customersWithAlerts.length} Kunde{customersWithAlerts.length !== 1 ? 'n' : ''} mit Alerts
+              {highCount > 0 && (
+                <span style={{ color: '#f87171', marginLeft: '14px', fontWeight: 600 }}>
+                  {highCount} Hoch
+                </span>
+              )}
+              {medCount > 0 && (
+                <span style={{ color: '#fbbf24', marginLeft: '10px', fontWeight: 600 }}>
+                  {medCount} Mittel
                 </span>
               )}
             </p>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            {latestVersion && (
-              <div style={{ color: '#94a3b8', fontSize: '13px' }}>
-                Aktuelle Version:{' '}
-                {releaseUrl ? (
-                  <a href={releaseUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontFamily: 'monospace' }}>
-                    {latestVersion}
-                  </a>
-                ) : (
-                  <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{latestVersion}</span>
-                )}
-              </div>
-            )}
-            {lastUpdate && (
-              <div style={{ color: '#475569', fontSize: '12px', marginTop: '4px' }}>
-                Aktualisiert: {lastUpdate.toLocaleTimeString('de-DE')}
-              </div>
-            )}
-          </div>
+          {lastUpdate && (
+            <div style={{ color: '#475569', fontSize: '12px', paddingTop: '6px' }}>
+              Aktualisiert: {lastUpdate.toLocaleTimeString('de-DE')}
+            </div>
+          )}
         </div>
       </header>
 
@@ -100,21 +154,20 @@ export default function SophosDashboard() {
         <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>Lade Daten...</p>
       )}
 
-      {!loading && data.length === 0 && (
+      {!loading && totalAlerts === 0 && (
         <div style={{ textAlign: 'center', padding: '60px', color: '#475569' }}>
-          <p style={{ fontSize: '16px', marginBottom: '8px' }}>Keine Sophos-Tenants konfiguriert</p>
+          <p style={{ fontSize: '16px', marginBottom: '8px' }}>Keine aktiven Alerts</p>
           <p style={{ fontSize: '13px' }}>
-            Tenants können unter{' '}
-            <a href="#/admin" style={{ color: '#3b82f6' }}>Admin → Sophos</a> verknüpft werden.
+            Alerts werden beim nächsten Sophos-Sync aktualisiert.
           </p>
         </div>
       )}
 
-      {!loading && data.map(customer => {
+      {!loading && customersWithAlerts.map(customer => {
         const isExpanded = !!expanded[customer.customerId];
-        const outdated = customer.firewalls.filter(
-          fw => fw.status === 'update-available' || fw.status === 'major-update'
-        ).length;
+        const alerts = [...(customer.alerts ?? [])].sort((a, b) => severityOrder(a.severity) - severityOrder(b.severity));
+        const highAlerts = alerts.filter(a => a.severity === 'high').length;
+        const borderColor = highAlerts > 0 ? '#f8717140' : '#fbbf2430';
 
         return (
           <div
@@ -122,9 +175,9 @@ export default function SophosDashboard() {
             style={{
               backgroundColor: '#1e293b',
               borderRadius: '10px',
-              marginBottom: '12px',
+              marginBottom: '10px',
               overflow: 'hidden',
-              border: outdated > 0 ? '1px solid #f59e0b33' : '1px solid transparent',
+              border: `1px solid ${borderColor}`,
             }}
           >
             {/* Customer header */}
@@ -134,79 +187,48 @@ export default function SophosDashboard() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '16px 20px',
+                padding: '14px 20px',
                 cursor: 'pointer',
                 userSelect: 'none',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span style={{ color: '#94a3b8', fontSize: '13px' }}>{isExpanded ? '▾' : '▸'}</span>
-                <span style={{ color: '#f1f5f9', fontSize: '16px', fontWeight: 600 }}>
+                <span style={{ color: '#f1f5f9', fontSize: '15px', fontWeight: 600 }}>
                   {customer.customerName}
                 </span>
-                <span style={{
-                  fontFamily: 'monospace', fontSize: '11px', color: '#64748b',
-                  backgroundColor: '#0f172a', borderRadius: '4px', padding: '2px 7px',
-                }}>
-                  {customer.tenantId}
-                </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                {outdated > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {highAlerts > 0 && (
                   <span style={{
-                    fontSize: '12px', fontWeight: 600, color: '#fbbf24',
-                    backgroundColor: '#451a0340', borderRadius: '4px', padding: '2px 8px',
+                    fontSize: '12px', fontWeight: 700, color: '#f87171',
+                    backgroundColor: '#7f1d1d30', border: '1px solid #f8717140',
+                    borderRadius: '4px', padding: '2px 8px',
                   }}>
-                    {outdated} Update{outdated !== 1 ? 's' : ''}
+                    {highAlerts} Hoch
                   </span>
                 )}
-                <span style={{ color: '#64748b', fontSize: '13px' }}>
-                  {customer.firewalls.length} Firewall{customer.firewalls.length !== 1 ? 's' : ''}
+                {alerts.filter(a => a.severity === 'medium').length > 0 && (
+                  <span style={{
+                    fontSize: '12px', fontWeight: 700, color: '#fbbf24',
+                    backgroundColor: '#78350f30', border: '1px solid #fbbf2440',
+                    borderRadius: '4px', padding: '2px 8px',
+                  }}>
+                    {alerts.filter(a => a.severity === 'medium').length} Mittel
+                  </span>
+                )}
+                <span style={{ color: '#64748b', fontSize: '12px' }}>
+                  {alerts.length} Alert{alerts.length !== 1 ? 's' : ''} gesamt
                 </span>
               </div>
             </div>
 
-            {/* Firewalls table */}
+            {/* Alerts list */}
             {isExpanded && (
-              <div style={{ borderTop: '1px solid #0f172a', padding: '0 20px 16px' }}>
-                {customer.firewalls.length === 0 ? (
-                  <p style={{ color: '#475569', fontSize: '13px', padding: '12px 0 0' }}>
-                    Noch keine Firewalls synchronisiert.
-                  </p>
-                ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '12px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #334155' }}>
-                        <th style={{ textAlign: 'left', padding: '6px 8px', color: '#64748b', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Name</th>
-                        <th style={{ textAlign: 'left', padding: '6px 8px', color: '#64748b', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Hostname</th>
-                        <th style={{ textAlign: 'left', padding: '6px 8px', color: '#64748b', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Installiert</th>
-                        <th style={{ textAlign: 'left', padding: '6px 8px', color: '#64748b', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Aktuell</th>
-                        <th style={{ textAlign: 'left', padding: '6px 8px', color: '#64748b', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {customer.firewalls.map(fw => (
-                        <tr key={fw.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                          <td style={{ padding: '10px 8px', color: '#e2e8f0', fontSize: '14px', fontWeight: 500 }}>
-                            {fw.name}
-                          </td>
-                          <td style={{ padding: '10px 8px', color: '#94a3b8', fontSize: '13px', fontFamily: 'monospace' }}>
-                            {fw.hostname || '—'}
-                          </td>
-                          <td style={{ padding: '10px 8px', color: '#94a3b8', fontSize: '13px', fontFamily: 'monospace' }}>
-                            {fw.currentVersion}
-                          </td>
-                          <td style={{ padding: '10px 8px', color: '#94a3b8', fontSize: '13px', fontFamily: 'monospace' }}>
-                            {fw.latestVersion || '—'}
-                          </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <StatusBadge status={fw.status} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+              <div style={{ borderTop: '1px solid #0f172a', padding: '12px 20px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {alerts.map(a => (
+                  <AlertRow key={a.alertId} alert={a} />
+                ))}
               </div>
             )}
           </div>
