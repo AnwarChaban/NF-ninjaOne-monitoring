@@ -18,6 +18,12 @@
     "http://localhost:3001/*",
     "http://127.0.0.1:3001/*"
   ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ninja-widget@netfactory.de",
+      "strict_min_version": "109.0"
+    }
+  },
   "web_accessible_resources": [
     {
       "resources": ["widget.html", "widget.js", "widget.css"],

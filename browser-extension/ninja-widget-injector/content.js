@@ -61,7 +61,8 @@ function buildPanel() {
 
   // Widget iframe (fills the panel)
   const frame = document.createElement('iframe');
-  frame.src = chrome.runtime.getURL('widget.html');
+  const runtimeAPI = typeof browser !== 'undefined' ? browser : chrome;
+  frame.src = runtimeAPI.runtime.getURL('widget.html');
   frame.title = 'NetFactory Monitoring';
   Object.assign(frame.style, { flex: '1', width: '100%', border: '0', display: 'block' });
   panel.appendChild(frame);
