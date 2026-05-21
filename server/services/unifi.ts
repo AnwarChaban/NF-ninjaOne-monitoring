@@ -1,5 +1,6 @@
 import { getDb } from '../db';
 import { getUnifiRuntimeConfig, isUnifiConfigured } from './runtime-settings';
+import { storeProductVersion } from './products';
 import semver from 'semver';
 
 interface UnifiHost {
@@ -459,6 +460,13 @@ function toComparableSemver(version: string): string | null {
   return coerced ? coerced.version : null;
 }
 
+// Returns true only for plain numeric semver strings like "7.4.162" or "5.1.11".
+// Rejects device firmware strings like "UVC.SAV539gP.v5.3.89..." that the UniFi
+// API sometimes returns for the Network App latest-version field.
+function isCleanVersion(version: string): boolean {
+  return /^\d+\.\d+(\.\d+)*$/.test(normalizeString(version));
+}
+
 function pickHighestVersion(versions: string[]): string {
   let highestRaw = '';
   let highestSemver: string | null = null;
@@ -662,7 +670,8 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
       }
 
       if (host.networkCurrentVersion) {
-        const networkTargetVersion = host.networkLatestVersion || host.networkCurrentVersion;
+        const rawNetworkLatest = host.networkLatestVersion || host.networkCurrentVersion;
+        const networkTargetVersion = isCleanVersion(rawNetworkLatest) ? rawNetworkLatest : host.networkCurrentVersion;
         insertDevice.run(
           customer.id,
           `${host.name} (Network App)`,
@@ -673,7 +682,7 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
           null,
         );
         insertedDevices++;
-        networkLatestCandidates.push(networkTargetVersion);
+        if (isCleanVersion(networkTargetVersion)) networkLatestCandidates.push(networkTargetVersion);
       }
 
       for (const device of uniqueDevices.values()) {
@@ -700,7 +709,7 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
           Number.isFinite(deviceNumericId) ? deviceNumericId : null,
         );
         insertedDevices++;
-        if (targetVersion !== FORCED_UPDATE_MARKER) {
+        if (targetVersion !== FORCED_UPDATE_MARKER && isCleanVersion(targetVersion)) {
           networkLatestCandidates.push(targetVersion);
         }
       }
@@ -721,6 +730,8 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
     db.prepare(
       'INSERT INTO check_history (product, version, checked_at) VALUES (?, ?, ?)'
     ).run('unifi-os', highestOsVersion, checkedAt);
+
+    storeProductVersion('unifi-os', highestOsVersion, 'unifi', runtime.hostsApiUrl);
   }
 
   if (highestNetworkVersion) {
@@ -732,6 +743,8 @@ export async function syncUnifiData(): Promise<{ customers: number; hosts: numbe
     db.prepare(
       'INSERT INTO check_history (product, version, checked_at) VALUES (?, ?, ?)'
     ).run('unifi-network', highestNetworkVersion, checkedAt);
+
+    storeProductVersion('unifi-network', highestNetworkVersion, 'unifi', runtime.hostsApiUrl);
   }
 
   return {

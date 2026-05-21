@@ -2,11 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   fetchCustomers, createCustomer, updateCustomer, deleteCustomer,
   createDevice, updateDevice, deleteDevice,
-  fetchScraperProducts, fetchCustomProducts, triggerNinjaSync, triggerUnifiSync,
-  fetchUnifiMappings, createUnifiMapping, deleteUnifiMapping, fetchUnifiUnmatchedHosts,
+  fetchScraperProducts, fetchCustomProducts, triggerNinjaSync,
   fetchBackupAccounts, createBackupAccount, deleteBackupAccount,
   type MockCustomer, type MockDevice, type ScraperProduct, type CustomProduct,
-  type UnifiCustomerMapping, type UnifiUnmatchedHost, type BackupAccount,
+  type BackupAccount,
 } from '../../api';
 
 const inputStyle: React.CSSProperties = {
@@ -82,14 +81,7 @@ export default function CustomersPage() {
   const [editingDevice, setEditingDevice] = useState<(MockDevice & { customerId: number }) | null>(null);
   const [expandedDevices, setExpandedDevices] = useState<Record<string, boolean>>({});
   const [isSyncingNinja, setIsSyncingNinja] = useState(false);
-  const [isSyncingUnifi, setIsSyncingUnifi] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [unifiMappings, setUnifiMappings] = useState<UnifiCustomerMapping[]>([]);
-  const [unmatchedHosts, setUnmatchedHosts] = useState<UnifiUnmatchedHost[]>([]);
-  const [isUnifiMappingExpanded, setIsUnifiMappingExpanded] = useState(false);
-  const [mappingForm, setMappingForm] = useState<{ hostName: string; customerId: string }>({ hostName: '', customerId: '' });
-  const [isSavingMapping, setIsSavingMapping] = useState(false);
-  const [mappingMessage, setMappingMessage] = useState<string | null>(null);
   const [backupAccounts, setBackupAccounts] = useState<BackupAccount[]>([]);
   const [backupAccountForms, setBackupAccountForms] = useState<Record<number, { fromEmail: string; name: string }>>({});
   const hasAutoSyncedRef = useRef(false);
@@ -104,18 +96,14 @@ export default function CustomersPage() {
   } | null>(null);
 
   async function load() {
-    const [c, sp, cp, mappings, unmatched, bAccounts] = await Promise.all([
+    const [c, sp, cp, bAccounts] = await Promise.all([
       fetchCustomers().catch(() => [] as typeof customers),
       fetchScraperProducts().catch(() => [] as ScraperProduct[]),
       fetchCustomProducts().catch(() => [] as CustomProduct[]),
-      fetchUnifiMappings().catch(() => [] as UnifiCustomerMapping[]),
-      fetchUnifiUnmatchedHosts().catch(() => [] as UnifiUnmatchedHost[]),
       fetchBackupAccounts().catch(() => [] as BackupAccount[]),
     ]);
     setCustomers(c);
     setProducts([...sp.map(p => p.product), ...cp.map(p => p.id)]);
-    setUnifiMappings(mappings);
-    setUnmatchedHosts(unmatched);
     setBackupAccounts(bAccounts);
   }
 
@@ -153,51 +141,6 @@ export default function CustomersPage() {
     } finally {
       setIsSyncingNinja(false);
     }
-  }
-
-  async function handleUnifiSync() {
-    setIsSyncingUnifi(true);
-    setSyncMessage(null);
-    try {
-      const result = await triggerUnifiSync();
-      setSyncMessage(
-        `UniFi synchronisiert: ${result.hosts} Hosts, ${result.devices} Geräte, ${result.unmatchedHosts} ohne Match, ${result.ambiguousHosts} mehrdeutig`
-      );
-      await load();
-    } catch (error) {
-      setSyncMessage((error as Error).message || 'UniFi-Sync fehlgeschlagen');
-    } finally {
-      setIsSyncingUnifi(false);
-    }
-  }
-
-  async function handleCreateMapping() {
-    const matchText = mappingForm.hostName.trim();
-    const customerId = Number(mappingForm.customerId);
-
-    if (!matchText || !Number.isFinite(customerId) || customerId <= 0) {
-      setMappingMessage('Bitte UniFi Host und Kunden auswählen');
-      return;
-    }
-
-    setIsSavingMapping(true);
-    setMappingMessage(null);
-    try {
-      await createUnifiMapping({ matchText, customerId });
-      setMappingForm({ hostName: '', customerId: '' });
-      setMappingMessage('Mapping gespeichert');
-      await load();
-    } catch (error) {
-      setMappingMessage((error as Error).message || 'Mapping konnte nicht gespeichert werden');
-    } finally {
-      setIsSavingMapping(false);
-    }
-  }
-
-  async function handleDeleteMapping(id: number) {
-    if (!confirm('Mapping löschen?')) return;
-    await deleteUnifiMapping(id);
-    await load();
   }
 
   useEffect(() => {
@@ -304,109 +247,13 @@ export default function CustomersPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '12px', flexWrap: 'wrap' }}>
         <h2 style={{ color: '#f1f5f9', fontSize: '22px', fontWeight: 700, margin: 0 }}>Kunden & Geräte</h2>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button style={primaryBtn} onClick={handleNinjaSync} disabled={isSyncingNinja || isSyncingUnifi}>
-            {isSyncingNinja ? 'NinjaOne Sync läuft...' : 'NinjaOne jetzt synchronisieren'}
-          </button>
-          <button style={ghostBtn} onClick={handleUnifiSync} disabled={isSyncingNinja || isSyncingUnifi}>
-            {isSyncingUnifi ? 'UniFi Sync läuft...' : 'UniFi jetzt synchronisieren'}
-          </button>
-        </div>
+        <button style={primaryBtn} onClick={handleNinjaSync} disabled={isSyncingNinja}>
+          {isSyncingNinja ? 'NinjaOne Sync läuft...' : 'NinjaOne jetzt synchronisieren'}
+        </button>
       </div>
       {syncMessage && (
         <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>{syncMessage}</div>
       )}
-
-      <div style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '16px', marginBottom: '20px' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            cursor: 'pointer',
-            padding: '2px 0',
-            marginBottom: isUnifiMappingExpanded ? '12px' : 0,
-          }}
-          onClick={() => setIsUnifiMappingExpanded(prev => !prev)}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f1f5f9', fontSize: '16px', fontWeight: 600 }}>
-            <span style={{ color: '#94a3b8', fontSize: '13px' }}>{isUnifiMappingExpanded ? '▾' : '▸'}</span>
-            <span>UniFi Host-Mapping (manuell)</span>
-            <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 400, marginLeft: '8px' }}>
-              ({unifiMappings.length} Mappings)
-            </span>
-          </div>
-        </div>
-
-        {isUnifiMappingExpanded && (
-          <>
-            <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>
-              Wähle einen aktuell nicht gematchten UniFi-Host und ordne ihn einem Kunden zu.
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr auto', gap: '8px', marginBottom: '10px' }}>
-              <select
-                style={inputStyle}
-                value={mappingForm.hostName}
-                onChange={e => setMappingForm(prev => ({ ...prev, hostName: e.target.value }))}
-              >
-                <option value="">UniFi Host auswählen...</option>
-                {unmatchedHosts.map(host => (
-                  <option key={host.id} value={host.hostName}>{host.hostName}</option>
-                ))}
-              </select>
-              <select
-                style={inputStyle}
-                value={mappingForm.customerId}
-                onChange={e => setMappingForm(prev => ({ ...prev, customerId: e.target.value }))}
-              >
-                <option value="">Kunde auswählen...</option>
-                {customers.map(customer => (
-                  <option key={customer.id} value={String(customer.id)}>{customer.name}</option>
-                ))}
-              </select>
-              <button style={primaryBtn} onClick={handleCreateMapping} disabled={isSavingMapping}>
-                {isSavingMapping ? 'Speichert...' : 'Mapping speichern'}
-              </button>
-            </div>
-
-            {mappingMessage && (
-              <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '10px' }}>{mappingMessage}</div>
-            )}
-
-            {unmatchedHosts.length === 0 && (
-              <div style={{ color: '#64748b', fontSize: '12px', marginBottom: '10px' }}>
-                Keine offenen UniFi Hosts gefunden. Bitte zuerst UniFi-Sync ausführen.
-              </div>
-            )}
-
-            {unifiMappings.length > 0 ? (
-              <table style={{ ...deviceTableStyle, marginBottom: 0 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #334155' }}>
-                    <th style={{ textAlign: 'left', padding: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>Match-Text</th>
-                    <th style={{ textAlign: 'left', padding: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>Kunde</th>
-                    <th style={{ textAlign: 'right', padding: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>Aktion</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {unifiMappings.map(mapping => (
-                    <tr key={mapping.id} style={{ borderBottom: '1px solid #1e293b' }}>
-                      <td style={{ padding: '8px', color: '#e2e8f0', fontFamily: 'monospace', fontSize: '13px' }}>{mapping.matchText}</td>
-                      <td style={{ padding: '8px', color: '#cbd5e1', fontSize: '13px' }}>{mapping.customerName}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>
-                        <button style={dangerBtn} onClick={() => handleDeleteMapping(mapping.id)}>Löschen</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div style={{ color: '#64748b', fontSize: '12px' }}>Noch keine manuellen Mappings vorhanden.</div>
-            )}
-          </>
-        )}
-      </div>
 
       {/* Add Customer */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
