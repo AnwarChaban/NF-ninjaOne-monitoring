@@ -10,6 +10,7 @@ import settingsRouter from './routes/settings';
 import adminRouter from './routes/admin';
 import backupRouter from './routes/backup';
 import customersRouter from './routes/customers';
+import usersRouter from './routes/users';
 import { fetchAllLatestVersions } from './services/version-fetcher';
 import { compareVersions } from './services/comparator';
 import { sendNotifications, type UpdateNotification } from './services/notifier';
@@ -25,12 +26,13 @@ app.use(cors());
 app.use(express.json());
 
 // API routes
+app.use('/api', usersRouter);      // auth/login, auth/users (public) + users CRUD (admin)
 app.use('/api', productsRouter);
 app.use('/api', checksRouter);
 app.use('/api', settingsRouter);
-app.use('/api', adminRouter);
-app.use('/api', backupRouter);
+app.use('/api', backupRouter);     // before adminRouter — techniker-accessible /admin/backup-* routes here
 app.use('/api', customersRouter);
+app.use('/api', adminRouter);      // catches remaining /admin/* — requires administrator
 
 // Serve React frontend in production
 const clientDist = path.join(__dirname, '..', 'client', 'dist');

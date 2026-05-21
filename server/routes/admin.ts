@@ -12,8 +12,12 @@ import { syncNinjaOneData, fetchNinjaOneBackups } from '../services/ninjaone';
 import { syncUnifiData } from '../services/unifi';
 import { syncSophosData, syncSophosAlerts, fetchTenantsFromApi } from '../services/sophos';
 import { productNames } from '../services/version-fetcher';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 const router = Router();
+
+// All routes in this file start with /admin — scope auth to that prefix only
+router.use('/admin', requireAuth, requireRole('administrator'));
 
 // Device IDs are namespaced by source to avoid collisions across tables
 const UNIFI_ID_OFFSET = 1_000_000;

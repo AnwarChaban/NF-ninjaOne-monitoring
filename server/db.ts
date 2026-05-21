@@ -196,6 +196,27 @@ function initDb() {
       created_at TEXT NOT NULL,
       FOREIGN KEY (check_id) REFERENCES backup_checks(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      display_name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('administrator', 'techniker')),
+      password_hash TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      active INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      session_token TEXT UNIQUE NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
   `);
 
   createIndexes();
@@ -269,6 +290,13 @@ function createIndexes() {
     CREATE INDEX IF NOT EXISTS idx_sophos_devices_customer ON sophos_devices(sophos_customer_id);
     CREATE INDEX IF NOT EXISTS idx_sophos_devices_product ON sophos_devices(product_id);
   `);
+
+  // Add password_hash column to users if not exists
+  const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  if (userCols.length > 0 && !userCols.some(c => c.name === 'password_hash')) {
+    db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT`);
+    console.log('[DB] Migrated users: added password_hash column');
+  }
 
   // Add hostname column to sophos_devices if it doesn't exist yet
   const sophosDeviceCols = db.prepare('PRAGMA table_info(sophos_devices)').all() as Array<{ name: string }>;

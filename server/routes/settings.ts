@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getDb } from '../db';
 import { config } from '../config';
 import { isNinjaOneConfigured, isSophosConfigured } from '../services/runtime-settings';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 const router = Router();
 
@@ -24,7 +25,7 @@ const ALLOWED_SETTINGS_KEYS = new Set([
   'showUpToDateDevices',
 ]);
 
-router.get('/settings', (_req, res) => {
+router.get('/settings', requireAuth, requireRole('administrator'), (_req, res) => {
   const db = getDb();
   const settings: Record<string, string> = {
     ninjaoneApiKey: config.ninjaone.apiKey || '',
@@ -56,7 +57,7 @@ router.get('/settings', (_req, res) => {
   res.json(settings);
 });
 
-router.put('/settings', (req, res) => {
+router.put('/settings', requireAuth, requireRole('administrator'), (req, res) => {
   const db = getDb();
   const updates = req.body as Record<string, string>;
 

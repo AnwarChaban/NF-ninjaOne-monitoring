@@ -1,3 +1,4 @@
+import { getStoredUser } from '../api';
 
 type View = 'versions' | 'sophos' | 'backup';
 
@@ -12,6 +13,7 @@ const navItems: { view: View; label: string; hash: string; icon: string }[] = [
 ];
 
 export default function Sidebar({ activeView }: SidebarProps) {
+  const isAdmin = getStoredUser()?.role === 'administrator';
   return (
     <aside style={{
       width: '200px',
@@ -57,25 +59,27 @@ export default function Sidebar({ activeView }: SidebarProps) {
         })}
       </nav>
 
-      <div style={{ padding: '16px 20px', borderTop: '1px solid #1e293b' }}>
-        <a
-          href="#/admin"
-          style={{
-            display: 'block',
-            padding: '7px 12px',
-            borderRadius: '6px',
-            backgroundColor: 'transparent',
-            border: '1px solid #334155',
-            color: '#64748b',
-            textDecoration: 'none',
-            fontSize: '12px',
-            fontWeight: 500,
-            textAlign: 'center',
-          }}
-        >
-          ⚙ Admin
-        </a>
-      </div>
+      {isAdmin && (
+        <div style={{ padding: '16px 20px', borderTop: '1px solid #1e293b' }}>
+          <a
+            href="#/admin"
+            style={{
+              display: 'block',
+              padding: '7px 12px',
+              borderRadius: '6px',
+              backgroundColor: 'transparent',
+              border: '1px solid #334155',
+              color: '#64748b',
+              textDecoration: 'none',
+              fontSize: '12px',
+              fontWeight: 500,
+              textAlign: 'center',
+            }}
+          >
+            ⚙ Admin
+          </a>
+        </div>
+      )}
     </aside>
   );
 }

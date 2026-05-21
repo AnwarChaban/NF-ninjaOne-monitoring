@@ -8,12 +8,13 @@ import {
   getAllBackupAccounts,
 } from '../services/backup-checker';
 import { fetchEmailsFromSender } from '../services/graph-mail';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 const router = Router();
 
 // --- Debug / Test ---
 
-router.get('/admin/backup/test', async (_req, res) => {
+router.get('/admin/backup/test', requireAuth, requireRole('administrator'), async (_req, res) => {
   const { getGraphRuntimeConfig, getBackupMailbox, isGraphConfigured } = await import('../services/runtime-settings');
   const cfg = getGraphRuntimeConfig();
   const mailbox = getBackupMailbox();
@@ -108,7 +109,7 @@ router.get('/backup/status', (_req, res) => {
   }
 });
 
-router.post('/backup/sync', async (_req, res) => {
+router.post('/backup/sync', requireAuth, async (_req, res) => {
   if (!isGraphConfigured()) {
     res.status(400).json({ error: 'Microsoft Graph API ist nicht konfiguriert' });
     return;
@@ -123,17 +124,17 @@ router.post('/backup/sync', async (_req, res) => {
 
 // --- Admin: Backup Accounts ---
 
-router.get('/admin/backup-accounts', (_req, res) => {
+router.get('/admin/backup-accounts', requireAuth, (_req, res) => {
   res.json(getAllBackupAccounts());
 });
 
 // --- Admin: Backup Checks ---
 
-router.get('/admin/backup-checks', (_req, res) => {
+router.get('/admin/backup-checks', requireAuth, (_req, res) => {
   res.json(getAllBackupChecks());
 });
 
-router.post('/admin/backup-checks', (req, res) => {
+router.post('/admin/backup-checks', requireAuth, (req, res) => {
   const db = getDb();
   const { backupAccountId, name, intervalHours, graceHours, subjectFilter, subjectMatchType, bodyFilter } =
     req.body as {
@@ -177,7 +178,7 @@ router.post('/admin/backup-checks', (req, res) => {
   res.json({ ok: true, id: result.lastInsertRowid });
 });
 
-router.put('/admin/backup-checks/:id', (req, res) => {
+router.put('/admin/backup-checks/:id', requireAuth, (req, res) => {
   const db = getDb();
   const id = parseInt(req.params.id);
   const { name, backupAccountId, intervalHours, graceHours, subjectFilter, subjectMatchType, bodyFilter, active } =
@@ -215,13 +216,13 @@ router.put('/admin/backup-checks/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/admin/backup-checks/:id', (req, res) => {
+router.delete('/admin/backup-checks/:id', requireAuth, (req, res) => {
   getDb().prepare('DELETE FROM backup_checks WHERE id = ?').run(parseInt(req.params.id));
   res.json({ ok: true });
 });
 
 // Recent emails for a backup account — used to auto-fill new check form
-router.get('/admin/backup-accounts/:id/recent-emails', async (req, res) => {
+router.get('/admin/backup-accounts/:id/recent-emails', requireAuth, async (req, res) => {
   if (!isGraphConfigured()) {
     res.status(503).json({ error: 'Graph API nicht konfiguriert' });
     return;

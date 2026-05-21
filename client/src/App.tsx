@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { fetchProducts, fetchSettings, type ProductStatus } from './api';
+import { fetchProducts, fetchSettings, getStoredUser, clearAuthSession, type ProductStatus, type AuthUser } from './api';
 import ProductCard from './components/ProductCard';
 import AdminLayout from './components/AdminLayout';
 import Sidebar from './components/Sidebar';
-import BackupDashboard from './components/BackupDashboard';
+import BackupPage from './components/BackupPage';
 import CustomerOverview from './components/CustomerOverview';
 import CustomerDetailPage from './components/CustomerDetailPage';
 import SophosDashboard from './components/SophosDashboard';
+import Login from './components/Login';
 
 type GroupBy = 'software' | 'kunde';
 
@@ -233,11 +234,27 @@ function Dashboard() {
 
 export default function App() {
   const hash = useHash();
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getStoredUser());
+
+  function handleLogin() {
+    setCurrentUser(getStoredUser());
+  }
+
+  function handleLogout() {
+    clearAuthSession();
+    setCurrentUser(null);
+    location.hash = '#/';
+  }
+
+  if (!currentUser) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   const isAdmin = hash.startsWith('#/admin');
   const isBackup = hash.startsWith('#/backup');
   const isSophos = hash.startsWith('#/sophos');
 
-  if (isAdmin) return <AdminLayout />;
+  if (isAdmin) return <AdminLayout currentUser={currentUser} onLogout={handleLogout} />;
 
   const customerDetailMatch = hash.match(/^#\/customers\/(\d+)$/);
   const customerDetailId = customerDetailMatch ? parseInt(customerDetailMatch[1]) : null;
@@ -248,7 +265,7 @@ export default function App() {
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar activeView={activeView} />
       <main style={{ flex: 1, overflowY: 'auto' }}>
-        {isBackup && <BackupDashboard />}
+        {isBackup && <BackupPage />}
         {isSophos && <SophosDashboard />}
         {!isBackup && !isSophos && customerDetailId !== null && (
           <CustomerDetailPage customerId={customerDetailId} />
