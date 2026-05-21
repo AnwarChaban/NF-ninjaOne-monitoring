@@ -9,6 +9,7 @@ import {
 } from '../services/backup-checker';
 import { fetchEmailsFromSender } from '../services/graph-mail';
 import { requireAuth, requireRole } from '../middleware/auth';
+import { logAction } from '../services/audit';
 
 const router = Router();
 
@@ -175,6 +176,7 @@ router.post('/admin/backup-checks', requireAuth, (req, res) => {
     now,
   );
 
+  logAction(req.user!, 'backup_check.create', 'backup_check', Number(result.lastInsertRowid), name, { backupAccountId, intervalHours }, req);
   res.json({ ok: true, id: result.lastInsertRowid });
 });
 
@@ -213,11 +215,15 @@ router.put('/admin/backup-checks/:id', requireAuth, (req, res) => {
 
   values.push(id);
   db.prepare(`UPDATE backup_checks SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  logAction(req.user!, 'backup_check.update', 'backup_check', id, name ?? String(id), null, req);
   res.json({ ok: true });
 });
 
 router.delete('/admin/backup-checks/:id', requireAuth, (req, res) => {
-  getDb().prepare('DELETE FROM backup_checks WHERE id = ?').run(parseInt(req.params.id));
+  const id = parseInt(req.params.id);
+  const row = getDb().prepare('SELECT name FROM backup_checks WHERE id = ?').get(id) as { name: string } | undefined;
+  getDb().prepare('DELETE FROM backup_checks WHERE id = ?').run(id);
+  logAction(req.user!, 'backup_check.delete', 'backup_check', id, row?.name ?? String(id), null, req);
   res.json({ ok: true });
 });
 

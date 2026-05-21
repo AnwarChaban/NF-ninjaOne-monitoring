@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getDb } from '../db';
 import { createSession, invalidateSession, hashPassword, verifyPassword } from '../services/auth';
 import { requireAuth, requireRole } from '../middleware/auth';
+import { logAction } from '../services/audit';
 
 const router = Router();
 
@@ -130,6 +131,7 @@ router.post('/users', requireAuth, requireRole('administrator'), (req, res) => {
     const result = getDb().prepare(
       'INSERT INTO users (username, display_name, role, password_hash) VALUES (?, ?, ?, ?)'
     ).run(username, display_name, role, passwordHash);
+    logAction(req.user!, 'user.create', 'user', Number(result.lastInsertRowid), display_name, { username, role }, req);
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch (e: any) {
     if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -191,12 +193,16 @@ router.patch('/users/:id', requireAuth, requireRole('administrator'), (req, res)
 
   values.push(id);
   getDb().prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  logAction(req.user!, 'user.update', 'user', id, display_name ?? username, { role, active }, req);
   res.json({ ok: true });
 });
 
 // Deactivate user (admin only)
 router.delete('/users/:id', requireAuth, requireRole('administrator'), (req, res) => {
-  getDb().prepare('UPDATE users SET active = 0 WHERE id = ?').run(parseInt(req.params['id'] as string));
+  const id = parseInt(req.params['id'] as string);
+  const target = getDb().prepare('SELECT display_name FROM users WHERE id = ?').get(id) as { display_name: string } | undefined;
+  getDb().prepare('UPDATE users SET active = 0 WHERE id = ?').run(id);
+  logAction(req.user!, 'user.delete', 'user', id, target?.display_name ?? String(id), null, req);
   res.json({ ok: true });
 });
 

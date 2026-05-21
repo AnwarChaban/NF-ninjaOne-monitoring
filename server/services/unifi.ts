@@ -1,6 +1,7 @@
 import { getDb } from '../db';
 import { getUnifiRuntimeConfig, isUnifiConfigured } from './runtime-settings';
 import { storeProductVersion } from './products';
+import { startSync, completeSync, failSync } from './sync-history';
 import semver from 'semver';
 
 interface UnifiHost {
@@ -500,7 +501,26 @@ function pickHighestVersion(versions: string[]): string {
   return highestRaw;
 }
 
-export async function syncUnifiData(): Promise<{ customers: number; hosts: number; devices: number; unmatchedHosts: number; ambiguousHosts: number }> {
+export async function syncUnifiData(triggeredBy = 'cron'): Promise<{ customers: number; hosts: number; devices: number; unmatchedHosts: number; ambiguousHosts: number }> {
+  if (!isUnifiConfigured()) {
+    throw new Error('UniFi is not configured');
+  }
+
+  const custId = startSync('unifi', triggeredBy, 'unifi_customers');
+  const devId  = startSync('unifi', triggeredBy, 'unifi_devices');
+  try {
+    const result = await _syncUnifiDataInternal();
+    completeSync(custId, 0, result.customers);
+    completeSync(devId, result.devices);
+    return result;
+  } catch (e) {
+    failSync(custId, (e as Error).message);
+    failSync(devId,  (e as Error).message);
+    throw e;
+  }
+}
+
+async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: number; devices: number; unmatchedHosts: number; ambiguousHosts: number }> {
   if (!isUnifiConfigured()) {
     throw new Error('UniFi is not configured');
   }

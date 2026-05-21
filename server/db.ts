@@ -197,6 +197,33 @@ function initDb() {
       FOREIGN KEY (check_id) REFERENCES backup_checks(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      user_id INTEGER,
+      username TEXT,
+      action TEXT NOT NULL,
+      entity_type TEXT,
+      entity_id TEXT,
+      entity_name TEXT,
+      details TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      integration TEXT NOT NULL CHECK(integration IN ('ninjaone', 'unifi', 'sophos', 'backup')),
+      started_at DATETIME NOT NULL,
+      completed_at DATETIME,
+      status TEXT NOT NULL CHECK(status IN ('running', 'success', 'error')),
+      devices_synced INTEGER DEFAULT 0,
+      customers_synced INTEGER DEFAULT 0,
+      error_message TEXT,
+      triggered_by TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
@@ -290,6 +317,42 @@ function createIndexes() {
     CREATE INDEX IF NOT EXISTS idx_sophos_devices_customer ON sophos_devices(sophos_customer_id);
     CREATE INDEX IF NOT EXISTS idx_sophos_devices_product ON sophos_devices(product_id);
   `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+    CREATE INDEX IF NOT EXISTS idx_sync_history_integration ON sync_history(integration, completed_at DESC);
+  `);
+
+  // Add task_type to sync_history if not exists (must run BEFORE creating index on it)
+  const syncHistoryCols = db.prepare('PRAGMA table_info(sync_history)').all() as Array<{ name: string }>;
+  if (syncHistoryCols.length > 0 && !syncHistoryCols.some(c => c.name === 'task_type')) {
+    db.exec(`ALTER TABLE sync_history ADD COLUMN task_type TEXT`);
+    db.exec(`
+      UPDATE sync_history SET task_type = CASE integration
+        WHEN 'ninjaone' THEN 'ninjaone_devices'
+        WHEN 'unifi'    THEN 'unifi_devices'
+        WHEN 'sophos'   THEN 'sophos_devices'
+        WHEN 'backup'   THEN 'backup_emails'
+        ELSE integration
+      END
+      WHERE task_type IS NULL
+    `);
+    console.log('[DB] Migrated sync_history: added task_type column');
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sync_history_task ON sync_history(task_type, completed_at DESC)`);
+
+  // Add expires_at / expiry_warning_sent to settings if not exists
+  const settingsCols = db.prepare('PRAGMA table_info(settings)').all() as Array<{ name: string }>;
+  if (settingsCols.length > 0) {
+    if (!settingsCols.some(c => c.name === 'expires_at')) {
+      db.exec(`ALTER TABLE settings ADD COLUMN expires_at DATETIME`);
+    }
+    if (!settingsCols.some(c => c.name === 'expiry_warning_sent')) {
+      db.exec(`ALTER TABLE settings ADD COLUMN expiry_warning_sent INTEGER DEFAULT 0`);
+    }
+  }
 
   // Add password_hash column to users if not exists
   const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;

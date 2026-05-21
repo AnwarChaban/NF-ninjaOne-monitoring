@@ -1,6 +1,7 @@
 import { config } from '../config';
 import { getDb } from '../db';
 import { getNinjaOneRuntimeConfig, isNinjaOneConfigured } from './runtime-settings';
+import { startSync, completeSync, failSync } from './sync-history';
 
 export interface Customer {
   id: number;
@@ -225,6 +226,64 @@ async function fetchOrganizationDevices(apiUrl: string, orgId: number, authoriza
   }
 
   return [];
+}
+
+function saveNinjaOneCustomers(customers: Customer[]): number {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const selectCustomer = db.prepare('SELECT id FROM customers WHERE name = ?');
+  const insertCustomer = db.prepare('INSERT INTO customers (name, created_at, updated_at) VALUES (?, ?, ?)');
+  const upsertNinjaOneCustomer = db.prepare(
+    `INSERT INTO ninjaone_customers (customer_id, ninja_org_id, name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(ninja_org_id) DO UPDATE SET customer_id = excluded.customer_id, updated_at = excluded.updated_at`
+  );
+
+  let count = 0;
+  for (const customer of customers) {
+    const orgId = customer.devices[0]?.orgId;
+    if (!orgId) continue;
+
+    let customerId = (selectCustomer.get(customer.name) as any)?.id;
+    if (!customerId) {
+      customerId = insertCustomer.run(customer.name, now, now).lastInsertRowid;
+    }
+    upsertNinjaOneCustomer.run(customerId, String(orgId), `NinjaOne ${customer.name}`, now, now);
+    count++;
+  }
+  return count;
+}
+
+function saveNinjaOneDevices(customers: Customer[]): number {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const selectNinjaOneCustomer = db.prepare('SELECT id FROM ninjaone_customers WHERE ninja_org_id = ?');
+  const deleteNinjaDevices = db.prepare('DELETE FROM ninjaone_devices WHERE ninjaone_customer_id = ?');
+  const insertNinjaDevice = db.prepare(
+    `INSERT INTO ninjaone_devices (ninjaone_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  const upsertProduct = db.prepare(
+    'INSERT OR IGNORE INTO products (id, name, type, active, created_at) VALUES (?, ?, ?, 1, ?)'
+  );
+
+  let deviceCount = 0;
+  const transaction = db.transaction(() => {
+    for (const customer of customers) {
+      const orgId = customer.devices[0]?.orgId;
+      if (!orgId) continue;
+      const ninjaRow = selectNinjaOneCustomer.get(String(orgId)) as { id: number } | undefined;
+      if (!ninjaRow) continue;
+      deleteNinjaDevices.run(ninjaRow.id);
+      for (const device of customer.devices) {
+        upsertProduct.run(device.product, device.product, 'scraped', now);
+        insertNinjaDevice.run(ninjaRow.id, device.product, `ninja-${device.ninjaDeviceId || 'unknown'}`, device.name, device.currentVersion, now, now);
+        deviceCount++;
+      }
+    }
+  });
+  transaction();
+  return deviceCount;
 }
 
 function saveCustomersToDb(customers: Customer[]): void {
@@ -516,16 +575,51 @@ export async function fetchNinjaOneBackups(): Promise<BackupJob[]> {
   }));
 }
 
-export async function syncNinjaOneData(): Promise<{ customers: number; devices: number }> {
-  if (!isNinjaOneConfigured()) {
-    return { customers: 0, devices: 0 };
+export async function syncNinjaOneCustomers(triggeredBy = 'cron'): Promise<{ customers: number }> {
+  if (!isNinjaOneConfigured()) return { customers: 0 };
+  const syncId = startSync('ninjaone', triggeredBy, 'ninjaone_customers');
+  try {
+    const data = await fetchFromNinjaOne();
+    const count = saveNinjaOneCustomers(data);
+    completeSync(syncId, 0, count);
+    return { customers: count };
+  } catch (e) {
+    failSync(syncId, (e as Error).message);
+    throw e;
   }
+}
 
-  const customers = await fetchFromNinjaOne();
-  saveCustomersToDb(customers);
+export async function syncNinjaOneDevices(triggeredBy = 'cron'): Promise<{ devices: number }> {
+  if (!isNinjaOneConfigured()) return { devices: 0 };
+  const syncId = startSync('ninjaone', triggeredBy, 'ninjaone_devices');
+  try {
+    const data = await fetchFromNinjaOne();
+    const count = saveNinjaOneDevices(data);
+    completeSync(syncId, count);
+    return { devices: count };
+  } catch (e) {
+    failSync(syncId, (e as Error).message);
+    throw e;
+  }
+}
 
-  const devices = customers.reduce((sum, customer) => sum + customer.devices.length, 0);
-  return { customers: customers.length, devices };
+// Full sync: one API call, two task_type history entries
+export async function syncNinjaOneData(triggeredBy = 'cron'): Promise<{ customers: number; devices: number }> {
+  if (!isNinjaOneConfigured()) return { customers: 0, devices: 0 };
+  const custId = startSync('ninjaone', triggeredBy, 'ninjaone_customers');
+  const devId  = startSync('ninjaone', triggeredBy, 'ninjaone_devices');
+  try {
+    const data = await fetchFromNinjaOne();
+    const customers = saveNinjaOneCustomers(data);
+    completeSync(custId, 0, customers);
+    const devices = saveNinjaOneDevices(data);
+    completeSync(devId, devices);
+    return { customers, devices };
+  } catch (e) {
+    failSync(custId, (e as Error).message);
+    failSync(devId,  (e as Error).message);
+    throw e;
+  }
 }
 
 export async function getCustomers(): Promise<Customer[]> {

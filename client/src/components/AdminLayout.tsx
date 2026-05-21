@@ -5,9 +5,11 @@ import SettingsPage from './admin/SettingsPage';
 import SophosPage from './admin/SophosPage';
 import UnifiPage from './admin/UnifiPage';
 import UserManagement from './UserManagement';
+import AuditLogs from './AuditLogs';
+import SyncOverview from './SyncOverview';
 import { logout, type AuthUser } from '../api';
 
-type AdminTab = 'customers' | 'products' | 'unifi' | 'sophos' | 'settings' | 'users';
+type AdminTab = 'customers' | 'products' | 'unifi' | 'sophos' | 'settings' | 'users' | 'sync' | 'logs';
 
 interface TabDef {
   key: AdminTab;
@@ -20,8 +22,10 @@ const ALL_TABS: TabDef[] = [
   { key: 'products', label: 'Produkte', adminOnly: true },
   { key: 'unifi', label: 'UniFi', adminOnly: true },
   { key: 'sophos', label: 'Sophos', adminOnly: true },
+  { key: 'sync', label: 'Sync-Übersicht', adminOnly: true },
   { key: 'settings', label: 'Einstellungen', adminOnly: true },
   { key: 'users', label: 'Benutzer', adminOnly: true },
+  { key: 'logs', label: 'Audit-Protokoll', adminOnly: true },
 ];
 
 interface Props {
@@ -126,8 +130,10 @@ export default function AdminLayout({ currentUser, onLogout }: Props) {
           {activeTab === 'products' && <ProductsPage />}
           {activeTab === 'unifi' && <UnifiPage />}
           {activeTab === 'sophos' && <SophosPage />}
+          {activeTab === 'sync' && <SyncOverview />}
           {activeTab === 'settings' && <SettingsPage />}
           {activeTab === 'users' && <UserManagement />}
+          {activeTab === 'logs' && <AuditLogs />}
         </main>
       </div>
     </div>

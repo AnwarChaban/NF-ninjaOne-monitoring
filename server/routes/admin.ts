@@ -13,6 +13,7 @@ import { syncUnifiData } from '../services/unifi';
 import { syncSophosData, syncSophosAlerts, fetchTenantsFromApi } from '../services/sophos';
 import { productNames } from '../services/version-fetcher';
 import { requireAuth, requireRole } from '../middleware/auth';
+import { logAction } from '../services/audit';
 
 const router = Router();
 
@@ -74,6 +75,7 @@ router.put('/admin/scraper-products/:id', (req, res) => {
     storeProductVersion(req.params.id, latestVersion, 'scraped', releaseUrl);
   }
 
+  logAction(req.user!, 'product.update', 'product', req.params.id, name ?? req.params.id, { active, latestVersion }, req);
   res.json({ ok: true });
 });
 
@@ -118,6 +120,7 @@ router.post('/admin/custom-products', (req, res) => {
 
   createProduct(id, name, 'custom');
   storeProductVersion(id, latestVersion, 'scraped', releaseUrl);
+  logAction(req.user!, 'product.create', 'product', id, name, { latestVersion }, req);
   res.json({ ok: true });
 });
 
@@ -141,6 +144,7 @@ router.put('/admin/custom-products/:id', (req, res) => {
     storeProductVersion(req.params.id, latestVersion, 'scraped', releaseUrl);
   }
 
+  logAction(req.user!, 'product.update', 'product', req.params.id, name ?? existing.name, { active, latestVersion }, req);
   res.json({ ok: true });
 });
 
@@ -154,6 +158,7 @@ router.delete('/admin/custom-products/:id', (req, res) => {
   }
 
   db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
+  logAction(req.user!, 'product.delete', 'product', req.params.id, existing.name, null, req);
   res.json({ ok: true });
 });
 
@@ -193,12 +198,15 @@ router.post('/admin/products', (req, res) => {
   }
 
   createProduct(id, name, type || 'custom');
+  logAction(req.user!, 'product.create', 'product', id, name, { type }, req);
   res.json({ ok: true });
 });
 
 router.delete('/admin/products/:id', (req, res) => {
   const db = getDb();
+  const existing = getProduct(req.params.id);
   db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
+  logAction(req.user!, 'product.delete', 'product', req.params.id, existing?.name ?? req.params.id, null, req);
   res.json({ ok: true });
 });
 
@@ -216,6 +224,7 @@ router.put('/admin/products/:id', (req, res) => {
     active: active !== undefined ? (active ? 1 : 0) : existing.active,
   });
 
+  logAction(req.user!, 'product.update', 'product', req.params.id, name ?? existing.name, { active }, req);
   res.json({ ok: true });
 });
 
@@ -320,6 +329,7 @@ router.post('/admin/customers', (req, res) => {
     .prepare('INSERT INTO customers (name, created_at, updated_at) VALUES (?, ?, ?)')
     .run(name, now, now);
 
+  logAction(req.user!, 'customer.create', 'customer', Number(result.lastInsertRowid), name, null, req);
   res.json({ ok: true, id: result.lastInsertRowid });
 });
 
@@ -335,12 +345,16 @@ router.put('/admin/customers/:id', (req, res) => {
 
   const now = new Date().toISOString();
   db.prepare('UPDATE customers SET name = ?, updated_at = ? WHERE id = ?').run(name, now, customerId);
+  logAction(req.user!, 'customer.update', 'customer', customerId, name, null, req);
   res.json({ ok: true });
 });
 
 router.delete('/admin/customers/:id', (req, res) => {
   const db = getDb();
-  db.prepare('DELETE FROM customers WHERE id = ?').run(parseInt(req.params.id));
+  const id = parseInt(req.params.id);
+  const row = db.prepare('SELECT name FROM customers WHERE id = ?').get(id) as { name: string } | undefined;
+  db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+  logAction(req.user!, 'customer.delete', 'customer', id, row?.name ?? String(id), null, req);
   res.json({ ok: true });
 });
 
@@ -367,6 +381,7 @@ router.post('/admin/customers/:id/ninjaone', (req, res) => {
     const result = db
       .prepare('INSERT INTO ninjaone_customers (customer_id, ninja_org_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
       .run(customerId, ninjaOrgId, name, now, now);
+    logAction(req.user!, 'integration.create', 'ninjaone', customerId, name, { ninjaOrgId }, req);
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch {
     res.status(409).json({ error: 'NinjaOne account already exists for this customer' });
@@ -394,6 +409,7 @@ router.post('/admin/customers/:id/unifi', (req, res) => {
     const result = db
       .prepare('INSERT INTO unifi_customers (customer_id, unifi_customer_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
       .run(customerId, unifiCustomerId, name, now, now);
+    logAction(req.user!, 'integration.create', 'unifi', customerId, name, { unifiCustomerId }, req);
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch {
     res.status(409).json({ error: 'UniFi account already exists for this customer' });
@@ -421,6 +437,7 @@ router.post('/admin/customers/:id/sophos', (req, res) => {
     const result = db
       .prepare('INSERT INTO sophos_customers (customer_id, sophos_customer_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
       .run(customerId, sophosCustomerId, name, now, now);
+    logAction(req.user!, 'integration.create', 'sophos', customerId, name, { sophosCustomerId }, req);
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch {
     res.status(409).json({ error: 'Sophos account already exists for this customer' });
@@ -472,6 +489,7 @@ router.post('/admin/customers/:id/devices', (req, res) => {
     .prepare('INSERT INTO ninjaone_devices (ninjaone_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(ninjaOneCustomer.id, product, externalDeviceId, name, currentVersion, now, now);
 
+  logAction(req.user!, 'device.create', 'device', Number(result.lastInsertRowid), name, { product, currentVersion, customerId }, req);
   res.json({ ok: true, id: result.lastInsertRowid });
 });
 
@@ -484,6 +502,7 @@ router.put('/admin/devices/:id', (req, res) => {
 
   const now = new Date().toISOString();
 
+  const source = encodedId >= SOPHOS_ID_OFFSET ? 'sophos' : encodedId >= UNIFI_ID_OFFSET ? 'unifi' : 'ninjaone';
   if (encodedId >= SOPHOS_ID_OFFSET) {
     const rawId = encodedId - SOPHOS_ID_OFFSET;
     db.prepare('UPDATE sophos_devices SET name = COALESCE(?, name), product_id = COALESCE(?, product_id), current_version = COALESCE(?, current_version), updated_at = ? WHERE id = ?')
@@ -497,12 +516,14 @@ router.put('/admin/devices/:id', (req, res) => {
       .run(name ?? null, product ?? null, currentVersion ?? null, now, encodedId);
   }
 
+  logAction(req.user!, 'device.update', 'device', encodedId, name ?? String(encodedId), { source, product, currentVersion }, req);
   res.json({ ok: true });
 });
 
 router.delete('/admin/devices/:id', (req, res) => {
   const db = getDb();
   const encodedId = parseInt(req.params.id);
+  const source = encodedId >= SOPHOS_ID_OFFSET ? 'sophos' : encodedId >= UNIFI_ID_OFFSET ? 'unifi' : 'ninjaone';
 
   if (encodedId >= SOPHOS_ID_OFFSET) {
     db.prepare('DELETE FROM sophos_devices WHERE id = ?').run(encodedId - SOPHOS_ID_OFFSET);
@@ -512,6 +533,7 @@ router.delete('/admin/devices/:id', (req, res) => {
     db.prepare('DELETE FROM ninjaone_devices WHERE id = ?').run(encodedId);
   }
 
+  logAction(req.user!, 'device.delete', 'device', encodedId, String(encodedId), { source }, req);
   res.json({ ok: true });
 });
 
@@ -538,6 +560,7 @@ router.post('/admin/customers/:id/backup', (req, res) => {
     const result = db
       .prepare('INSERT INTO backup_accounts (customer_id, from_email, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
       .run(customerId, fromEmail, name, now, now);
+    logAction(req.user!, 'backup_account.create', 'backup_account', customerId, name, { fromEmail }, req);
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch {
     res.status(409).json({ error: 'Backup account already exists for this customer' });
@@ -546,20 +569,23 @@ router.post('/admin/customers/:id/backup', (req, res) => {
 
 router.delete('/admin/customers/:id/backup', (req, res) => {
   const db = getDb();
-  db.prepare('DELETE FROM backup_accounts WHERE customer_id = ?').run(parseInt(req.params.id));
+  const id = parseInt(req.params.id);
+  const row = db.prepare('SELECT name FROM backup_accounts WHERE customer_id = ?').get(id) as { name: string } | undefined;
+  db.prepare('DELETE FROM backup_accounts WHERE customer_id = ?').run(id);
+  logAction(req.user!, 'backup_account.delete', 'backup_account', id, row?.name ?? String(id), null, req);
   res.json({ ok: true });
 });
 
 // --- NinjaOne Sync ---
 
-router.post('/admin/ninjaone/sync', async (_req, res) => {
+router.post('/admin/ninjaone/sync', async (req, res) => {
   if (!isNinjaOneConfigured()) {
     res.status(400).json({ error: 'NinjaOne is not configured' });
     return;
   }
-
   try {
-    const result = await syncNinjaOneData();
+    const result = await syncNinjaOneData(`manual:${req.user?.username}`);
+    logAction(req.user!, 'sync.manual', 'integration', 'ninjaone', 'NinjaOne', result, req);
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
@@ -568,14 +594,14 @@ router.post('/admin/ninjaone/sync', async (_req, res) => {
 
 // --- UniFi Sync ---
 
-router.post('/admin/unifi/sync', async (_req, res) => {
+router.post('/admin/unifi/sync', async (req, res) => {
   if (!isUnifiConfigured()) {
     res.status(400).json({ error: 'UniFi is not configured' });
     return;
   }
-
   try {
-    const result = await syncUnifiData();
+    const result = await syncUnifiData(`manual:${req.user?.username}`);
+    logAction(req.user!, 'sync.manual', 'integration', 'unifi', 'UniFi', result, req);
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
@@ -609,7 +635,10 @@ router.get('/admin/sophos/tenants', (_req, res) => {
 
 router.delete('/admin/customers/:id/sophos', (req, res) => {
   const db = getDb();
-  db.prepare('DELETE FROM sophos_customers WHERE customer_id = ?').run(parseInt(req.params.id));
+  const id = parseInt(req.params.id);
+  const row = db.prepare('SELECT name FROM sophos_customers WHERE customer_id = ?').get(id) as { name: string } | undefined;
+  db.prepare('DELETE FROM sophos_customers WHERE customer_id = ?').run(id);
+  logAction(req.user!, 'integration.delete', 'sophos', id, row?.name ?? String(id), null, req);
   res.json({ ok: true });
 });
 
@@ -645,6 +674,7 @@ router.post('/admin/sophos/assign-tenant', (req, res) => {
     db.prepare('INSERT INTO sophos_customers (customer_id, sophos_customer_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
       .run(customerId, tenantId, tenantName, now, now);
     db.prepare('DELETE FROM sophos_unmatched_tenants WHERE tenant_id = ?').run(tenantId);
+    logAction(req.user!, 'integration.create', 'sophos', customerId, tenantName, { tenantId }, req);
     res.json({ ok: true });
   } catch {
     res.status(409).json({ error: 'Tenant oder Kunde bereits verknüpft' });
@@ -666,33 +696,32 @@ router.get('/admin/sophos/api-tenants', async (_req, res) => {
 
 // --- Sophos Sync ---
 
-router.post('/admin/sophos/sync', async (_req, res) => {
+router.post('/admin/sophos/sync', async (req, res) => {
   if (!isSophosConfigured()) {
     res.status(400).json({ error: 'Sophos ist nicht konfiguriert' });
     return;
   }
-
   try {
-    const result = await syncSophosData();
-    // Also refresh alerts after device sync
+    const result = await syncSophosData(`manual:${req.user?.username}`);
     const alertResult = await syncSophosAlerts().catch(err => {
       console.error('[Sophos] Alert sync failed after device sync:', err);
       return { total: 0 };
     });
+    logAction(req.user!, 'sync.manual', 'integration', 'sophos', 'Sophos', { ...result, alerts: alertResult.total }, req);
     res.json({ ok: true, ...result, alerts: alertResult.total });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
 });
 
-router.post('/admin/sophos/sync-alerts', async (_req, res) => {
+router.post('/admin/sophos/sync-alerts', async (req, res) => {
   if (!isSophosConfigured()) {
     res.status(400).json({ error: 'Sophos ist nicht konfiguriert' });
     return;
   }
-
   try {
     const result = await syncSophosAlerts();
+    logAction(req.user!, 'sync.manual', 'integration', 'sophos_alerts', 'Sophos Alerts', result, req);
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
@@ -733,6 +762,7 @@ router.post('/admin/unifi/mappings', (req, res) => {
     const result = db
       .prepare('INSERT INTO unifi_customer_mappings (match_text, customer_id, created_at) VALUES (?, ?, ?)')
       .run(matchText, customerId, now);
+    logAction(req.user!, 'unifi_mapping.create', 'unifi_mapping', Number(result.lastInsertRowid), matchText, { customerId }, req);
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch {
     res.status(409).json({ error: 'Mapping for this match text already exists' });
@@ -741,7 +771,10 @@ router.post('/admin/unifi/mappings', (req, res) => {
 
 router.delete('/admin/unifi/mappings/:id', (req, res) => {
   const db = getDb();
-  db.prepare('DELETE FROM unifi_customer_mappings WHERE id = ?').run(parseInt(req.params.id));
+  const id = parseInt(req.params.id);
+  const row = db.prepare('SELECT match_text FROM unifi_customer_mappings WHERE id = ?').get(id) as { match_text: string } | undefined;
+  db.prepare('DELETE FROM unifi_customer_mappings WHERE id = ?').run(id);
+  logAction(req.user!, 'unifi_mapping.delete', 'unifi_mapping', id, row?.match_text ?? String(id), null, req);
   res.json({ ok: true });
 });
 

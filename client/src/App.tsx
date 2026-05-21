@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { fetchProducts, fetchSettings, getStoredUser, clearAuthSession, type ProductStatus, type AuthUser } from './api';
+import { fetchProducts, fetchSettings, getStoredUser, clearAuthSession, apiFetch, type ProductStatus, type AuthUser } from './api';
+
+interface SecretExpiry {
+  key: string;
+  label: string;
+  daysUntilExpiry: number | null;
+  isExpired: boolean;
+}
 import ProductCard from './components/ProductCard';
 import AdminLayout from './components/AdminLayout';
 import Sidebar from './components/Sidebar';
@@ -232,6 +239,33 @@ function Dashboard() {
   );
 }
 
+function ExpiryBanner() {
+  const [expiring, setExpiring] = useState<SecretExpiry[]>([]);
+
+  useEffect(() => {
+    if (getStoredUser()?.role !== 'administrator') return;
+    apiFetch('/api/settings/expiry')
+      .then(r => r.ok ? r.json() : [])
+      .then((data: SecretExpiry[]) => setExpiring(data.filter(s => s.isExpired || (s.daysUntilExpiry !== null && s.daysUntilExpiry <= 14))))
+      .catch(() => {});
+  }, []);
+
+  if (expiring.length === 0) return null;
+
+  const msg = expiring.map(s => s.isExpired ? `${s.label} (abgelaufen)` : `${s.label} (${s.daysUntilExpiry}d)`).join(', ');
+  return (
+    <div style={{
+      backgroundColor: expiring.some(s => s.isExpired) ? '#7f1d1d' : '#78350f',
+      color: expiring.some(s => s.isExpired) ? '#fca5a5' : '#fbbf24',
+      padding: '8px 20px', fontSize: '13px', display: 'flex',
+      justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+    }}>
+      <span>{expiring.some(s => s.isExpired) ? '❌' : '⚠️'} API-Schlüssel: {msg}</span>
+      <a href="#/admin" style={{ color: 'inherit', fontWeight: 700, marginLeft: '16px' }}>→ Einstellungen</a>
+    </div>
+  );
+}
+
 export default function App() {
   const hash = useHash();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getStoredUser());
@@ -262,7 +296,9 @@ export default function App() {
   const activeView = isBackup ? 'backup' : isSophos ? 'sophos' : 'versions';
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      <ExpiryBanner />
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
       <Sidebar activeView={activeView} />
       <main style={{ flex: 1, overflowY: 'auto' }}>
         {isBackup && <BackupPage />}
@@ -272,6 +308,7 @@ export default function App() {
         )}
         {!isBackup && !isSophos && customerDetailId === null && <Dashboard />}
       </main>
+      </div>
     </div>
   );
 }

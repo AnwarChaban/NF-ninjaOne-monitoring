@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import cron from 'node-cron';
+import type { ScheduledTask } from 'node-cron';
 import { config } from './config';
 import { getDb } from './db';
 import productsRouter from './routes/products';
@@ -11,14 +12,18 @@ import adminRouter from './routes/admin';
 import backupRouter from './routes/backup';
 import customersRouter from './routes/customers';
 import usersRouter from './routes/users';
+import logsRouter from './routes/logs';
+import syncRouter from './routes/sync';
 import { fetchAllLatestVersions } from './services/version-fetcher';
 import { compareVersions } from './services/comparator';
 import { sendNotifications, type UpdateNotification } from './services/notifier';
-import { isNinjaOneConfigured, isGraphConfigured, isSophosConfigured } from './services/runtime-settings';
+import { isNinjaOneConfigured, isGraphConfigured, isSophosConfigured, getCronSchedule, seedCronSettings, ALL_TASK_TYPES } from './services/runtime-settings';
+import { cleanupOldLogs } from './services/audit';
+import { checkExpiringSecrets } from './services/secret-expiry';
 import { getAllDevicesByProduct } from './services/customers';
 import { syncBackupEmails } from './services/backup-checker';
-import { syncNinjaOneData } from './services/ninjaone';
-import { syncSophosData } from './services/sophos';
+import { syncNinjaOneData, syncNinjaOneCustomers, syncNinjaOneDevices } from './services/ninjaone';
+import { syncSophosData, syncSophosAlerts } from './services/sophos';
 
 const app = express();
 
@@ -26,13 +31,15 @@ app.use(cors());
 app.use(express.json());
 
 // API routes
-app.use('/api', usersRouter);      // auth/login, auth/users (public) + users CRUD (admin)
+app.use('/api', usersRouter);
+app.use('/api', logsRouter);
+app.use('/api', syncRouter);
 app.use('/api', productsRouter);
 app.use('/api', checksRouter);
 app.use('/api', settingsRouter);
-app.use('/api', backupRouter);     // before adminRouter — techniker-accessible /admin/backup-* routes here
+app.use('/api', backupRouter);
 app.use('/api', customersRouter);
-app.use('/api', adminRouter);      // catches remaining /admin/* — requires administrator
+app.use('/api', adminRouter);
 
 // Serve React frontend in production
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
@@ -41,90 +48,111 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(clientDist, 'index.html'));
 });
 
-// Initialize DB
+// Initialize DB + seed cron settings
 getDb();
+seedCronSettings();
 
-// Scheduled version check
+// --- Scheduled version check (static cron, not user-configurable) ---
 async function runScheduledCheck() {
-  console.log(`[Scheduler] Running version check at ${new Date().toISOString()}`);
   try {
     const versions = await fetchAllLatestVersions();
     const devicesByProduct = getAllDevicesByProduct();
-
     const updates: UpdateNotification[] = [];
-
     for (const version of versions) {
       if (!version.latestVersion) continue;
-      
       const devices = devicesByProduct[version.product] || [];
       for (const device of devices) {
         const comparison = compareVersions(device.currentVersion, version.latestVersion, version.product);
         updates.push({ ...comparison, customer: device.customerName, device: `${device.source}-device` });
       }
     }
-
     await sendNotifications(updates);
-    console.log(`[Scheduler] Check complete. ${updates.length} device(s) checked.`);
+    console.log(`[Scheduler] Version check complete. ${updates.length} device(s) checked.`);
   } catch (error) {
-    console.error('[Scheduler] Check failed:', error);
+    console.error('[Scheduler] Version check failed:', error);
   }
 }
-
 cron.schedule(config.checkCron, runScheduledCheck);
-console.log(`[Scheduler] Cron scheduled: ${config.checkCron}`);
 
-cron.schedule(config.backupSyncCron, async () => {
-  if (!isGraphConfigured()) return;
-  console.log(`[Scheduler] Running backup email sync at ${new Date().toISOString()}`);
-  try {
-    const result = await syncBackupEmails();
-    console.log(`[Scheduler] Backup sync complete. ${result.newResults} new result(s) from ${result.checked} check(s).`);
-  } catch (error) {
-    console.error('[Scheduler] Backup sync failed:', error);
+// --- Dynamic cron jobs (configurable via UI) ---
+const activeCronJobs = new Map<string, ScheduledTask>();
+
+type TaskRunner = () => Promise<void>;
+
+const TASK_RUNNERS: Record<string, TaskRunner> = {
+  ninjaone_customers: async () => {
+    if (!isNinjaOneConfigured()) return;
+    const r = await syncNinjaOneCustomers('cron');
+    console.log(`[Scheduler] ninjaone_customers done. ${r.customers} customers.`);
+  },
+  ninjaone_devices: async () => {
+    if (!isNinjaOneConfigured()) return;
+    const r = await syncNinjaOneDevices('cron');
+    console.log(`[Scheduler] ninjaone_devices done. ${r.devices} devices.`);
+  },
+  unifi_customers: async () => {
+    console.log('[Scheduler] unifi_customers: no standalone impl — trigger full UniFi sync via UI');
+  },
+  unifi_devices: async () => {
+    console.log('[Scheduler] unifi_devices: no standalone impl — trigger full UniFi sync via UI');
+  },
+  sophos_customers: async () => {
+    if (!isSophosConfigured()) return;
+    const r = await syncSophosData('cron');
+    console.log(`[Scheduler] sophos_customers done. ${r.tenants} tenants.`);
+  },
+  sophos_devices: async () => {
+    if (!isSophosConfigured()) return;
+    const r = await syncSophosData('cron');
+    console.log(`[Scheduler] sophos_devices done. ${r.devices} devices.`);
+  },
+  sophos_alerts: async () => {
+    if (!isSophosConfigured()) return;
+    const r = await syncSophosAlerts('cron');
+    console.log(`[Scheduler] sophos_alerts done. ${r.total} alerts.`);
+  },
+  backup_emails: async () => {
+    if (!isGraphConfigured()) return;
+    const r = await syncBackupEmails('cron');
+    console.log(`[Scheduler] backup_emails done. ${r.newResults} new result(s).`);
+  },
+};
+
+export function reloadCronJobs(): void {
+  for (const [, job] of activeCronJobs) {
+    try { job.stop(); } catch { /* ignore */ }
   }
+  activeCronJobs.clear();
+
+  for (const taskType of ALL_TASK_TYPES) {
+    const schedule = getCronSchedule(taskType);
+    const runner = TASK_RUNNERS[taskType];
+    if (!runner) continue;
+    const job = cron.schedule(schedule, async () => {
+      try { await runner(); }
+      catch (e) { console.error(`[Scheduler] ${taskType} failed:`, e); }
+    });
+    activeCronJobs.set(taskType, job);
+  }
+
+  console.log(`[Scheduler] ${ALL_TASK_TYPES.length} task cron jobs reloaded.`);
+}
+
+// Daily audit log cleanup + secret expiry check
+cron.schedule('30 2 * * *', () => {
+  const deleted = cleanupOldLogs();
+  if (deleted > 0) console.log(`[Scheduler] Audit log cleanup: ${deleted} entries deleted`);
+  checkExpiringSecrets();
 });
-console.log(`[Scheduler] Backup sync cron scheduled: ${config.backupSyncCron}`);
-
-cron.schedule(config.ninjaSyncCron, async () => {
-  if (!isNinjaOneConfigured()) {
-    return;
-  }
-
-  console.log(`[Scheduler] Running NinjaOne sync at ${new Date().toISOString()}`);
-  try {
-    const result = await syncNinjaOneData();
-    console.log(`[Scheduler] NinjaOne sync complete. ${result.customers} customer(s), ${result.devices} device entry/entries.`);
-  } catch (error) {
-    console.error('[Scheduler] NinjaOne sync failed:', error);
-  }
-});
-console.log(`[Scheduler] NinjaOne sync cron scheduled: ${config.ninjaSyncCron}`);
-
-cron.schedule(config.sophosSyncCron, async () => {
-  if (!isSophosConfigured()) return;
-  console.log(`[Scheduler] Running Sophos sync at ${new Date().toISOString()}`);
-  try {
-    const result = await syncSophosData();
-    console.log(`[Scheduler] Sophos sync complete. ${result.tenants} tenant(s), ${result.devices} device(s).`);
-  } catch (error) {
-    console.error('[Scheduler] Sophos sync failed:', error);
-  }
-});
-console.log(`[Scheduler] Sophos sync cron scheduled: ${config.sophosSyncCron}`);
 
 // Start server
 app.listen(config.port, () => {
   console.log(`[Server] Version Checker running on http://localhost:${config.port}`);
-  console.log(`[Server] NinjaOne: runtime-config enabled`);
+
+  reloadCronJobs();
 
   if (isNinjaOneConfigured()) {
-    console.log('[Scheduler] Running initial NinjaOne sync...');
-    syncNinjaOneData().catch(error => {
-      console.error('[Scheduler] Initial NinjaOne sync failed:', error);
-    });
+    syncNinjaOneData('startup').catch(e => console.error('[Startup] NinjaOne sync failed:', e));
   }
-
-  // Run initial check on startup
-  console.log('[Scheduler] Running initial version check...');
   runScheduledCheck();
 });

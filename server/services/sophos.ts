@@ -1,5 +1,6 @@
 import { getDb } from '../db';
 import { getSophosRuntimeConfig } from './runtime-settings';
+import { startSync, completeSync, failSync } from './sync-history';
 
 interface SophosTenant {
   id: string;
@@ -187,7 +188,22 @@ function matchTenantToCustomer(
   return undefined;
 }
 
-export async function syncSophosData(): Promise<{ tenants: number; devices: number; unmatched: number }> {
+export async function syncSophosData(triggeredBy = 'cron'): Promise<{ tenants: number; devices: number; unmatched: number }> {
+  const custId = startSync('sophos', triggeredBy, 'sophos_customers');
+  const devId  = startSync('sophos', triggeredBy, 'sophos_devices');
+  try {
+    const result = await _syncSophosDataInternal();
+    completeSync(custId, 0, result.tenants);
+    completeSync(devId, result.devices);
+    return result;
+  } catch (e) {
+    failSync(custId, (e as Error).message);
+    failSync(devId,  (e as Error).message);
+    throw e;
+  }
+}
+
+async function _syncSophosDataInternal(): Promise<{ tenants: number; devices: number; unmatched: number }> {
   const cfg = getSophosRuntimeConfig();
   const db = getDb();
   const now = new Date().toISOString();
@@ -288,7 +304,19 @@ export async function syncSophosData(): Promise<{ tenants: number; devices: numb
   return { tenants: syncedTenants, devices: syncedDevices, unmatched: unmatchedCount };
 }
 
-export async function syncSophosAlerts(): Promise<{ total: number }> {
+export async function syncSophosAlerts(triggeredBy = 'cron'): Promise<{ total: number }> {
+  const syncId = startSync('sophos', triggeredBy, 'sophos_alerts');
+  try {
+    const result = await _syncSophosAlertsInternal();
+    completeSync(syncId, result.total);
+    return result;
+  } catch (e) {
+    failSync(syncId, (e as Error).message);
+    throw e;
+  }
+}
+
+async function _syncSophosAlertsInternal(): Promise<{ total: number }> {
   const cfg = getSophosRuntimeConfig();
   const db = getDb();
   const now = new Date().toISOString();

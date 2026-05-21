@@ -1,6 +1,7 @@
 import { getDb } from '../db';
 import { fetchEmailsFromSender } from './graph-mail';
 import { isGraphConfigured } from './runtime-settings';
+import { startSync, completeSync, failSync } from './sync-history';
 
 export type BackupStatus = 'success' | 'failed' | 'missed' | 'unknown';
 
@@ -80,7 +81,21 @@ function computeStatus(check: BackupCheck, lastResult: BackupCheckResult | null)
   return lastResult.status;
 }
 
-export async function syncBackupEmails(): Promise<{ checked: number; newResults: number }> {
+export async function syncBackupEmails(triggeredBy = 'cron'): Promise<{ checked: number; newResults: number }> {
+  if (!isGraphConfigured()) throw new Error('Microsoft Graph API is not configured');
+
+  const syncId = startSync('backup', triggeredBy, 'backup_emails');
+  try {
+    const result = await _syncBackupEmailsInternal();
+    completeSync(syncId, result.newResults, result.checked);
+    return result;
+  } catch (e) {
+    failSync(syncId, (e as Error).message);
+    throw e;
+  }
+}
+
+async function _syncBackupEmailsInternal(): Promise<{ checked: number; newResults: number }> {
   if (!isGraphConfigured()) throw new Error('Microsoft Graph API is not configured');
 
   const db = getDb();

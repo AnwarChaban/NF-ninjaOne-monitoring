@@ -112,3 +112,52 @@ export function isSophosConfigured(): boolean {
   const cfg = getSophosRuntimeConfig();
   return !!(cfg.tokenUrl && cfg.clientId && cfg.clientSecret && cfg.partnerId);
 }
+
+// --- Cron Schedule Management ---
+
+// Per-task cron keys and defaults
+const TASK_CRON_KEYS: Record<string, string> = {
+  ninjaone_customers: 'cron_ninjaone_customers',
+  ninjaone_devices:   'cron_ninjaone_devices',
+  unifi_customers:    'cron_unifi_customers',
+  unifi_devices:      'cron_unifi_devices',
+  sophos_customers:   'cron_sophos_customers',
+  sophos_devices:     'cron_sophos_devices',
+  sophos_alerts:      'cron_sophos_alerts',
+  backup_emails:      'cron_backup_emails',
+};
+
+const TASK_CRON_DEFAULTS: Record<string, () => string> = {
+  ninjaone_customers: () => config.ninjaSyncCron  || '0 2 * * *',
+  ninjaone_devices:   () => config.ninjaSyncCron  || '0 2 * * *',
+  unifi_customers:    () => '0 2 * * *',
+  unifi_devices:      () => '0 2 * * *',
+  sophos_customers:   () => config.sophosSyncCron || '0 3 * * *',
+  sophos_devices:     () => config.sophosSyncCron || '0 3 * * *',
+  sophos_alerts:      () => config.sophosSyncCron || '0 3 * * *',
+  backup_emails:      () => config.backupSyncCron || '*/15 * * * *',
+};
+
+export function getCronSchedule(taskType: string): string {
+  const key = TASK_CRON_KEYS[taskType];
+  if (!key) return '0 2 * * *';
+  return getSettingOrFallback(key, TASK_CRON_DEFAULTS[taskType]?.() ?? '0 2 * * *');
+}
+
+export function updateCronSchedule(taskType: string, cronExpression: string): void {
+  const key = TASK_CRON_KEYS[taskType];
+  if (!key) throw new Error(`Unknown task type: ${taskType}`);
+  getDb().prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, cronExpression);
+}
+
+export function seedCronSettings(): void {
+  const db = getDb();
+  for (const [taskType, key] of Object.entries(TASK_CRON_KEYS)) {
+    const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+    if (!existing) {
+      db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, TASK_CRON_DEFAULTS[taskType]?.() ?? '0 2 * * *');
+    }
+  }
+}
+
+export const ALL_TASK_TYPES = Object.keys(TASK_CRON_KEYS);

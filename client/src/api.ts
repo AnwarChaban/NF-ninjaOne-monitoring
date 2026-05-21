@@ -32,7 +32,7 @@ export function getStoredUser(): AuthUser | null {
   }
 }
 
-function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+export function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = getAuthToken();
   const headers: Record<string, string> = { ...(options.headers as Record<string, string> ?? {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
