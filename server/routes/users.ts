@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getDb } from '../db';
-import { createSession, invalidateSession, hashPassword, verifyPassword } from '../services/auth';
+import { createSession, invalidateSession, hashPassword, verifyPassword, SESSION_DURATION_MS_APP } from '../services/auth';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { logAction } from '../services/audit';
 
@@ -37,7 +37,7 @@ router.post('/auth/setup', (req, res) => {
 // Public: list active users for login dropdown (includes hasPassword flag)
 router.get('/auth/users', (_req, res) => {
   const users = getDb().prepare(`
-    SELECT id, username, display_name AS displayName, role,
+    SELECT id, username, display_name AS displayName, role, email,
            CASE WHEN password_hash IS NOT NULL THEN 1 ELSE 0 END AS hasPassword
     FROM users WHERE active = 1 ORDER BY display_name
   `).all();
@@ -74,7 +74,31 @@ router.post('/auth/login', (req, res) => {
   }
 
   const ua = Array.isArray(req.headers['user-agent']) ? req.headers['user-agent'][0] : req.headers['user-agent'];
+  const token = createSession(user.id, req.ip, ua, SESSION_DURATION_MS_APP);
+  logAction({ id: user.id, username: user.username, displayName: user.displayName, role: user.role }, 'user.login', 'user', user.id, user.displayName, { method: 'password' }, req);
+  res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } });
+});
+
+// Auto-login via NinjaOne UID (called by browser extension)
+router.post('/auth/ninja-login', (req, res) => {
+  const { ninja_uid } = req.body as { ninja_uid?: string };
+  if (!ninja_uid) {
+    res.status(400).json({ error: 'ninja_uid is required' });
+    return;
+  }
+
+  const user = getDb().prepare(
+    'SELECT id, username, display_name AS displayName, role FROM users WHERE ninja_uid = ? AND active = 1'
+  ).get(ninja_uid) as { id: number; username: string; displayName: string; role: string } | undefined;
+
+  if (!user) {
+    res.status(401).json({ error: 'Kein Version Checker Benutzer für diese NinjaOne-Sitzung gefunden.' });
+    return;
+  }
+
+  const ua = Array.isArray(req.headers['user-agent']) ? req.headers['user-agent'][0] : req.headers['user-agent'];
   const token = createSession(user.id, req.ip, ua);
+  logAction({ id: user.id, username: user.username, displayName: user.displayName, role: user.role }, 'user.login', 'user', user.id, user.displayName, { method: 'ninja_sso' }, req);
   res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } });
 });
 
@@ -84,6 +108,7 @@ router.post('/auth/logout', requireAuth, (req, res) => {
   if (authHeader?.startsWith('Bearer ')) {
     invalidateSession(authHeader.slice(7));
   }
+  logAction(req.user!, 'user.logout', 'user', req.user!.id, req.user!.displayName, null, req);
   res.json({ ok: true });
 });
 
@@ -95,7 +120,7 @@ router.get('/auth/me', requireAuth, (req, res) => {
 // List all users (admin only)
 router.get('/users', requireAuth, requireRole('administrator'), (_req, res) => {
   const users = getDb().prepare(`
-    SELECT id, username, display_name AS displayName, role,
+    SELECT id, username, display_name AS displayName, role, email, ninja_uid AS ninjaUid,
            CASE WHEN password_hash IS NOT NULL THEN 1 ELSE 0 END AS hasPassword,
            created_at AS createdAt, active
     FROM users ORDER BY display_name
@@ -105,11 +130,12 @@ router.get('/users', requireAuth, requireRole('administrator'), (_req, res) => {
 
 // Create user (admin only)
 router.post('/users', requireAuth, requireRole('administrator'), (req, res) => {
-  const { username, display_name, role, password } = req.body as {
+  const { username, display_name, role, password, email } = req.body as {
     username?: string;
     display_name?: string;
     role?: string;
     password?: string;
+    email?: string;
   };
 
   if (!username || !display_name || !role) {
@@ -126,11 +152,12 @@ router.post('/users', requireAuth, requireRole('administrator'), (req, res) => {
   }
 
   const passwordHash = (role === 'administrator' && password) ? hashPassword(password) : null;
+  const emailVal = email?.trim() || null;
 
   try {
     const result = getDb().prepare(
-      'INSERT INTO users (username, display_name, role, password_hash) VALUES (?, ?, ?, ?)'
-    ).run(username, display_name, role, passwordHash);
+      'INSERT INTO users (username, display_name, role, password_hash, email) VALUES (?, ?, ?, ?, ?)'
+    ).run(username, display_name, role, passwordHash, emailVal);
     logAction(req.user!, 'user.create', 'user', Number(result.lastInsertRowid), display_name, { username, role }, req);
     res.json({ ok: true, id: result.lastInsertRowid });
   } catch (e: any) {
@@ -145,13 +172,14 @@ router.post('/users', requireAuth, requireRole('administrator'), (req, res) => {
 // Update user (admin only)
 router.patch('/users/:id', requireAuth, requireRole('administrator'), (req, res) => {
   const id = parseInt(req.params['id'] as string);
-  const { username, display_name, role, active, password, remove_password } = req.body as {
+  const { username, display_name, role, active, password, remove_password, email } = req.body as {
     username?: string;
     display_name?: string;
     role?: string;
     active?: boolean;
     password?: string;
     remove_password?: boolean;
+    email?: string;
   };
 
   // Check target user's role before allowing password ops
@@ -180,6 +208,7 @@ router.patch('/users/:id', requireAuth, requireRole('administrator'), (req, res)
     }
   }
   if (active !== undefined) { updates.push('active = ?'); values.push(active ? 1 : 0); }
+  if (email !== undefined) { updates.push('email = ?'); values.push(email?.trim() || null); }
   if (password) {
     updates.push('password_hash = ?'); values.push(hashPassword(password));
   } else if (remove_password) {

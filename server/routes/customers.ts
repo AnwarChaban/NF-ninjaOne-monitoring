@@ -117,6 +117,14 @@ router.get('/customers', (_req, res) => {
       }
     }
 
+    // Also count NinjaOne devices with no tracked product (product_id IS NULL)
+    const untracked = (db.prepare(`
+      SELECT COUNT(*) as cnt FROM ninjaone_devices nd
+      JOIN ninjaone_customers nc ON nd.ninjaone_customer_id = nc.id
+      WHERE nc.customer_id = ? AND nd.product_id IS NULL
+    `).get(customer.id) as { cnt: number }).cnt;
+    totalDevices += untracked;
+
     const customerChecks = backupChecks.filter(c => c.customerId === customer.id);
     const backupStatuses = customerChecks.map(c => computeBackupStatus(c, db));
     const backupStatus: BackupStatus | 'none' = customerChecks.length === 0

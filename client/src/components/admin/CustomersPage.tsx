@@ -31,6 +31,7 @@ interface GroupedDevice {
 }
 
 function isUnknownEntry(device: MockDevice): boolean {
+  if (!device.product) return false;
   return device.product.toLowerCase() === 'unknown' && device.currentVersion.toLowerCase() === 'unknown';
 }
 
@@ -64,7 +65,7 @@ function groupDevices(devices: MockDevice[]): GroupedDevice[] {
 
       return {
         ...group,
-        entries: [...normalizedEntries].sort((a, b) => a.product.localeCompare(b.product)),
+        entries: [...normalizedEntries].sort((a, b) => (a.product ?? '').localeCompare(b.product ?? '')),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -445,7 +446,7 @@ export default function CustomersPage() {
                         <td style={{ padding: '8px', color: '#94a3b8', fontSize: '13px' }}>
                           Neues Produkt für {group.name}
                           <div style={{ marginTop: '6px', color: '#64748b', fontSize: '12px' }}>
-                            Vorhanden: {group.entries.some(e => !isUnknownEntry(e)) ? group.entries.map(e => `${e.product} (${e.currentVersion})`).join(', ') : 'keine'}
+                            Vorhanden: {group.entries.some(e => !isUnknownEntry(e)) ? group.entries.map(e => `${e.product ?? 'Nicht erfasst'}${e.currentVersion ? ` (${e.currentVersion})` : ''}`).join(', ') : 'keine'}
                           </div>
                         </td>
                         <td style={{ padding: '8px' }}>
@@ -503,7 +504,7 @@ export default function CustomersPage() {
                         ) : (
                           <>
                             <td style={{ padding: '8px 8px 8px 24px', color: '#64748b', fontSize: '13px' }}>↳ {group.name}</td>
-                            <td style={{ padding: '8px', color: '#94a3b8', fontSize: '14px' }}>{device.product}</td>
+                            <td style={{ padding: '8px', color: device.product ? '#94a3b8' : '#475569', fontSize: '14px', fontStyle: device.product ? 'normal' : 'italic' }}>{device.product ?? 'Nicht erfasst'}</td>
                             <td style={{ padding: '8px', color: '#94a3b8', fontSize: '14px', fontFamily: 'monospace' }}>{device.currentVersion}</td>
                             <td style={{ padding: '8px', textAlign: 'right' }}>
                               <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>

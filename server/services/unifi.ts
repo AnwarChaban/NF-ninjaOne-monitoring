@@ -568,9 +568,9 @@ async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: num
   const devices = flattenedDevices.map(parseDevice).filter(device => !!device.id);
 
   const db = getDb();
-  const customers = db.prepare('SELECT id, name FROM mock_customers').all() as Array<{ id: number; name: string }>;
+  const customers = db.prepare('SELECT id, name FROM customers').all() as Array<{ id: number; name: string }>;
   if (customers.length === 0) {
-    throw new Error('No customers available. Please sync NinjaOne first.');
+    throw new Error('No customers available. Please add customers first.');
   }
 
   const normalizedCustomers: CustomerMatcher[] = customers.map(customer => ({
@@ -609,15 +609,22 @@ async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: num
     }
   }
 
-  const deleteUnifiDevices = db.prepare("DELETE FROM mock_devices WHERE source = 'unifi'");
+  const upsertProduct = db.prepare('INSERT OR IGNORE INTO products (id, name, type, active, created_at) VALUES (?, ?, ?, 1, ?)');
+  const upsertUnifiCustomer = db.prepare(`
+    INSERT INTO unifi_customers (customer_id, unifi_customer_id, name, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(customer_id) DO UPDATE SET updated_at = excluded.updated_at
+  `);
+  const selectUnifiCustomer = db.prepare('SELECT id FROM unifi_customers WHERE customer_id = ?');
+  const deleteAllUnifiDevices = db.prepare('DELETE FROM unifi_devices');
   const deleteUnmatchedHosts = db.prepare('DELETE FROM unifi_unmatched_hosts');
   const insertUnmatchedHost = db.prepare(
     'INSERT INTO unifi_unmatched_hosts (host_id, host_name, reason, synced_at) VALUES (?, ?, ?, ?)'
   );
-  const insertDevice = db.prepare(
-    "INSERT INTO mock_devices (customer_id, name, product, current_version, latest_version, source, org_id, ninja_device_id) VALUES (?, ?, ?, ?, ?, 'unifi', ?, ?)"
-  );
-  const upsertScraperProduct = db.prepare('INSERT OR IGNORE INTO scraper_products (product, active) VALUES (?, 1)');
+  const insertDevice = db.prepare(`
+    INSERT INTO unifi_devices (unifi_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
 
   let unmatchedHosts = 0;
   let ambiguousHosts = 0;
@@ -629,9 +636,10 @@ async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: num
   const networkLatestCandidates: string[] = [];
 
   const transaction = db.transaction(() => {
-    upsertScraperProduct.run('unifi-os');
-    upsertScraperProduct.run('unifi-network');
-    deleteUnifiDevices.run();
+    const unifiCustomerIdMap = new Map<number, number>();
+    upsertProduct.run('unifi-os', 'unifi-os', 'scraped', now);
+    upsertProduct.run('unifi-network', 'unifi-network', 'scraped', now);
+    deleteAllUnifiDevices.run();
     deleteUnmatchedHosts.run();
 
     for (const host of hosts) {
@@ -662,6 +670,14 @@ async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: num
       }
 
       const customer = matchResult.customer;
+
+      if (!unifiCustomerIdMap.has(customer.id)) {
+        upsertUnifiCustomer.run(customer.id, `unifi-${customer.id}`, `UniFi ${customer.name}`, now, now);
+        const row = selectUnifiCustomer.get(customer.id) as { id: number };
+        unifiCustomerIdMap.set(customer.id, row.id);
+      }
+      const unifiCustId = unifiCustomerIdMap.get(customer.id)!;
+
       const hostRelatedDevices = [
         ...(host.controllerUuid ? (devicesByController.get(host.controllerUuid) || []) : []),
         ...(host.id ? (devicesByHostId.get(host.id) || []) : []),
@@ -677,13 +693,13 @@ async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: num
       if (host.osCurrentVersion) {
         const osTargetVersion = host.osLatestVersion || host.osCurrentVersion;
         insertDevice.run(
-          customer.id,
-          `${host.name} (UniFi OS)`,
+          unifiCustId,
           'unifi-os',
+          host.id ? `os-${host.id}` : `os-${host.name}`,
+          `${host.name} (UniFi OS)`,
           host.osCurrentVersion,
-          osTargetVersion,
-          Number.isFinite(hostNumericId) ? hostNumericId : null,
-          null,
+          now,
+          now,
         );
         insertedDevices++;
         osLatestCandidates.push(osTargetVersion);
@@ -693,13 +709,13 @@ async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: num
         const rawNetworkLatest = host.networkLatestVersion || host.networkCurrentVersion;
         const networkTargetVersion = isCleanVersion(rawNetworkLatest) ? rawNetworkLatest : host.networkCurrentVersion;
         insertDevice.run(
-          customer.id,
-          `${host.name} (Network App)`,
+          unifiCustId,
           'unifi-network',
+          host.id ? `net-${host.id}` : `net-${host.name}`,
+          `${host.name} (Network App)`,
           host.networkCurrentVersion,
-          networkTargetVersion,
-          Number.isFinite(hostNumericId) ? hostNumericId : null,
-          null,
+          now,
+          now,
         );
         insertedDevices++;
         if (isCleanVersion(networkTargetVersion)) networkLatestCandidates.push(networkTargetVersion);
@@ -717,16 +733,15 @@ async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: num
         }
 
         insertedNetworkDeviceKeys.add(dedupeKey);
-        const deviceNumericId = Number(device.id);
 
         insertDevice.run(
-          customer.id,
-          `${device.name || `UniFi Device ${device.id}`} (${device.deviceType || 'Device'})`,
+          unifiCustId,
           'unifi-network',
+          `device-${device.id}`,
+          `${device.name || `UniFi Device ${device.id}`} (${device.deviceType || 'Device'})`,
           version,
-          targetVersion,
-          Number.isFinite(hostNumericId) ? hostNumericId : null,
-          Number.isFinite(deviceNumericId) ? deviceNumericId : null,
+          now,
+          now,
         );
         insertedDevices++;
         if (targetVersion !== FORCED_UPDATE_MARKER && isCleanVersion(targetVersion)) {
@@ -742,28 +757,10 @@ async function _syncUnifiDataInternal(): Promise<{ customers: number; hosts: num
   const highestNetworkVersion = pickHighestVersion(networkLatestCandidates);
 
   if (highestOsVersion) {
-    const checkedAt = new Date().toISOString();
-    db.prepare(
-      'INSERT OR REPLACE INTO version_cache (product, latest_version, release_url, checked_at) VALUES (?, ?, ?, ?)'
-    ).run('unifi-os', highestOsVersion, runtime.hostsApiUrl, checkedAt);
-
-    db.prepare(
-      'INSERT INTO check_history (product, version, checked_at) VALUES (?, ?, ?)'
-    ).run('unifi-os', highestOsVersion, checkedAt);
-
     storeProductVersion('unifi-os', highestOsVersion, 'unifi', runtime.hostsApiUrl);
   }
 
   if (highestNetworkVersion) {
-    const checkedAt = new Date().toISOString();
-    db.prepare(
-      'INSERT OR REPLACE INTO version_cache (product, latest_version, release_url, checked_at) VALUES (?, ?, ?, ?)'
-    ).run('unifi-network', highestNetworkVersion, runtime.hostsApiUrl, checkedAt);
-
-    db.prepare(
-      'INSERT INTO check_history (product, version, checked_at) VALUES (?, ?, ?)'
-    ).run('unifi-network', highestNetworkVersion, checkedAt);
-
     storeProductVersion('unifi-network', highestNetworkVersion, 'unifi', runtime.hostsApiUrl);
   }
 

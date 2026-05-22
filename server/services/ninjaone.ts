@@ -241,7 +241,7 @@ function saveNinjaOneCustomers(customers: Customer[]): number {
 
   let count = 0;
   for (const customer of customers) {
-    const orgId = customer.devices[0]?.orgId;
+    const orgId = customer.id;
     if (!orgId) continue;
 
     let customerId = (selectCustomer.get(customer.name) as any)?.id;
@@ -270,103 +270,31 @@ function saveNinjaOneDevices(customers: Customer[]): number {
   let deviceCount = 0;
   const transaction = db.transaction(() => {
     for (const customer of customers) {
-      const orgId = customer.devices[0]?.orgId;
+      const orgId = customer.id;
       if (!orgId) continue;
       const ninjaRow = selectNinjaOneCustomer.get(String(orgId)) as { id: number } | undefined;
       if (!ninjaRow) continue;
       deleteNinjaDevices.run(ninjaRow.id);
       for (const device of customer.devices) {
-        upsertProduct.run(device.product, device.product, 'scraped', now);
-        insertNinjaDevice.run(ninjaRow.id, device.product, `ninja-${device.ninjaDeviceId || 'unknown'}`, device.name, device.currentVersion, now, now);
+        const productId = device.product || null;
+        if (productId) {
+          upsertProduct.run(productId, productId, 'scraped', now);
+        }
+        insertNinjaDevice.run(
+          ninjaRow.id,
+          productId,
+          `ninja-${device.ninjaDeviceId || 'unknown'}`,
+          device.name,
+          device.currentVersion || '',
+          now,
+          now
+        );
         deviceCount++;
       }
     }
   });
   transaction();
   return deviceCount;
-}
-
-function saveCustomersToDb(customers: Customer[]): void {
-  const db = getDb();
-  const now = new Date().toISOString();
-
-  // Get or create base customers BEFORE transaction
-  const selectCustomer = db.prepare('SELECT id FROM customers WHERE name = ?');
-  const insertCustomer = db.prepare('INSERT INTO customers (name, created_at, updated_at) VALUES (?, ?, ?)');
-  
-  // Build map of customer IDs first
-  const customerMap: Record<string, { id: number; orgId?: number }> = {};
-  for (const customer of customers) {
-    let customerId = (selectCustomer.get(customer.name) as any)?.id;
-    if (!customerId) {
-      const result = insertCustomer.run(customer.name, now, now);
-      customerId = result.lastInsertRowid as number;
-    }
-    customerMap[customer.name] = { id: customerId, orgId: customer.devices[0]?.orgId };
-  }
-
-  // NinjaOne operations INSIDE transaction
-  const upsertNinjaOneCustomer = db.prepare(
-    `INSERT INTO ninjaone_customers (customer_id, ninja_org_id, name, created_at, updated_at) 
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(ninja_org_id) DO UPDATE SET customer_id = excluded.customer_id, updated_at = excluded.updated_at`
-  );
-  const selectNinjaOneCustomer = db.prepare('SELECT id FROM ninjaone_customers WHERE ninja_org_id = ?');
-  const deleteNinjaDevices = db.prepare('DELETE FROM ninjaone_devices WHERE ninjaone_customer_id = ?');
-  const insertNinjaDevice = db.prepare(
-    `INSERT INTO ninjaone_devices (ninjaone_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-  const upsertProduct = db.prepare(
-    'INSERT OR IGNORE INTO products (id, name, type, active, created_at) VALUES (?, ?, ?, 1, ?)'
-  );
-
-  const transaction = db.transaction(() => {
-    for (const customer of customers) {
-      const { id: customerId, orgId } = customerMap[customer.name];
-
-      if (!orgId) {
-        console.warn(`[NinjaOne] Customer ${customer.name} has no orgId, skipping`);
-        continue;
-      }
-
-      const ninjaOrgId = String(orgId);
-      const ninjaOneRow = selectNinjaOneCustomer.get(ninjaOrgId) as any;
-      let ninjaOneCustomerId: number;
-
-      if (ninjaOneRow) {
-        ninjaOneCustomerId = ninjaOneRow.id;
-      } else {
-        const result = upsertNinjaOneCustomer.run(
-          customerId,
-          ninjaOrgId,
-          `NinjaOne ${customer.name}`,
-          now,
-          now
-        );
-        ninjaOneCustomerId = result.lastInsertRowid as number;
-      }
-
-      // Delete old ninja devices
-      deleteNinjaDevices.run(ninjaOneCustomerId);
-
-      // Insert new devices — ensure product exists first to satisfy FK constraint
-      for (const device of customer.devices) {
-        upsertProduct.run(device.product, device.product, 'scraped', now);
-        insertNinjaDevice.run(
-          ninjaOneCustomerId,
-          device.product,
-          `ninja-${device.ninjaDeviceId || 'unknown'}`,
-          device.name,
-          device.currentVersion,
-          now,
-          now
-        );
-      }
-    }
-  });
-
-  transaction();
 }
 
 // Token cache
@@ -482,16 +410,26 @@ async function fetchFromNinjaOne(): Promise<Customer[]> {
 
       const name = d.systemName || d.dnsName || `Device-${d.id}`;
       const softwareEntries = extractSoftwareEntries(d, customFieldMap);
-      if (softwareEntries.length === 0) continue;
 
-      mappedDevices.push(...softwareEntries.map((entry, index) => ({
-        id: rawId * 100 + index + 1,
-        name,
-        product: entry.product,
-        currentVersion: entry.currentVersion,
-        orgId: Number(org.id),
-        ninjaDeviceId: rawId,
-      })));
+      if (softwareEntries.length === 0) {
+        mappedDevices.push({
+          id: rawId,
+          name,
+          product: '',
+          currentVersion: '',
+          orgId: Number(org.id),
+          ninjaDeviceId: rawId,
+        });
+      } else {
+        mappedDevices.push(...softwareEntries.map((entry, index) => ({
+          id: rawId * 100 + index + 1,
+          name,
+          product: entry.product,
+          currentVersion: entry.currentVersion,
+          orgId: Number(org.id),
+          ninjaDeviceId: rawId,
+        })));
+      }
     }
 
     customers.push({
@@ -504,30 +442,6 @@ async function fetchFromNinjaOne(): Promise<Customer[]> {
   return customers;
 }
 
-function getMockData(): Customer[] {
-  const db = getDb();
-  const customers = db.prepare('SELECT * FROM mock_customers').all() as { id: number; name: string }[];
-
-  return customers.map(c => {
-    const devices = db.prepare('SELECT * FROM mock_devices WHERE customer_id = ?').all(c.id) as {
-      id: number; name: string; product: string; current_version: string; latest_version?: string | null; org_id?: number | null; ninja_device_id?: number | null;
-    }[];
-
-    return {
-      id: c.id,
-      name: c.name,
-      devices: devices.map(d => ({
-        id: d.id,
-        name: d.name,
-        product: d.product,
-        currentVersion: d.current_version,
-        latestVersion: d.latest_version ?? undefined,
-        orgId: d.org_id ?? undefined,
-        ninjaDeviceId: d.ninja_device_id ?? undefined,
-      })),
-    };
-  });
-}
 
 export interface BackupJob {
   deviceId: number;
@@ -622,14 +536,90 @@ export async function syncNinjaOneData(triggeredBy = 'cron'): Promise<{ customer
   }
 }
 
+export async function syncNinjaOneUsers(_triggeredBy = 'manual'): Promise<{ synced: number; created: number; updated: number }> {
+  if (!isNinjaOneConfigured()) throw new Error('NinjaOne ist nicht konfiguriert');
+
+  const { apiUrl, apiKey, clientId, clientSecret } = getNinjaOneRuntimeConfig();
+  const authHeader = await getAuthorizationHeader(apiUrl, apiKey, clientId, clientSecret);
+
+  const res = await fetch(`${apiUrl}/users`, {
+    headers: { 'Authorization': authHeader, 'Accept': 'application/json' },
+  });
+  if (!res.ok) throw new Error(`NinjaOne /users Fehler: ${res.status} ${res.statusText}`);
+
+  const rawUsers = await res.json() as any[];
+
+  // Only sync users with @net in their email (company filter)
+  const filtered = rawUsers.filter(u => {
+    const email = String(u.email || '').toLowerCase();
+    return email.includes('@net') && (u.uid || u.userUid);
+  });
+
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const selectByNinjaUid = db.prepare('SELECT id FROM users WHERE ninja_uid = ?');
+  const selectByEmail    = db.prepare('SELECT id FROM users WHERE email = ?');
+  const selectByUsername = db.prepare('SELECT id FROM users WHERE username = ?');
+
+  const updateByNinjaUid = db.prepare(
+    'UPDATE users SET display_name = ?, email = ? WHERE ninja_uid = ?'
+  );
+  const linkNinjaUid = db.prepare(
+    'UPDATE users SET ninja_uid = ?, display_name = ? WHERE id = ?'
+  );
+  const insertUser = db.prepare(
+    'INSERT INTO users (username, display_name, role, email, ninja_uid, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+
+  let created = 0;
+  let updated = 0;
+
+  const transaction = db.transaction(() => {
+    for (const u of filtered) {
+      const ninjaUid   = String(u.uid ?? u.userUid);
+      const email      = String(u.email).toLowerCase().trim();
+      const firstName  = String(u.firstName ?? '').trim();
+      const lastName   = String(u.lastName  ?? '').trim();
+      const displayName = (firstName || lastName)
+        ? [firstName, lastName].filter(Boolean).join(' ')
+        : email;
+
+      // 1. Already linked by ninja_uid → update name/email
+      const byUid = selectByNinjaUid.get(ninjaUid) as { id: number } | undefined;
+      if (byUid) {
+        updateByNinjaUid.run(displayName, email, ninjaUid);
+        updated++;
+        continue;
+      }
+
+      // 2. Manually created user with same email → link ninja_uid
+      const byEmail = selectByEmail.get(email) as { id: number } | undefined;
+      if (byEmail) {
+        linkNinjaUid.run(ninjaUid, displayName, byEmail.id);
+        updated++;
+        continue;
+      }
+
+      // 3. Create new techniker account
+      const baseUsername = email.split('@')[0];
+      const username = !(selectByUsername.get(baseUsername)) ? baseUsername : email;
+      try {
+        insertUser.run(username, displayName, 'techniker', email, ninjaUid, now);
+        created++;
+      } catch { /* skip on unique conflict */ }
+    }
+  });
+
+  transaction();
+  console.log(`[NinjaOne] User sync: ${filtered.length} gefunden, ${created} neu, ${updated} aktualisiert`);
+  return { synced: filtered.length, created, updated };
+}
+
 export async function getCustomers(): Promise<Customer[]> {
-  if (isNinjaOneConfigured()) {
-    return await fetchFromNinjaOne();
-  }
-  console.log('[NinjaOne] No API key configured, using mock data');
-  return getMockData();
+  return await fetchFromNinjaOne();
 }
 
 export function isUsingMockData(): boolean {
-  return !isNinjaOneConfigured();
+  return false;
 }

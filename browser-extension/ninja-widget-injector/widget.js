@@ -5,11 +5,16 @@ const API_BASE_CANDIDATES = [
 
 const REFRESH_INTERVAL_MS = 30000;
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const AUTH_KEY = 'nf_widget_token';
+let authToken = sessionStorage.getItem(AUTH_KEY);
+
 // Navigation state
-let groupBy = "software";   // "software" | "kunde" | "sophos" | "backup"
-let currentView = "list";   // "list" | "detail"
+let groupBy = "software";      // "software" | "kunde" | "sophos" | "backup"
+let currentView = "list";      // "list" | "detail"
 let selectedCustomerId = null;
 let resolvedBase = null;
+let backupSubView = "status";  // "status" | "manage"
 
 const elements = {
   root: document.getElementById("widget-root"),
@@ -135,7 +140,14 @@ async function fetchFromApi(path) {
   const candidates = resolvedBase ? [resolvedBase] : API_BASE_CANDIDATES;
   for (const base of candidates) {
     try {
-      const res = await fetch(`${base}${path}`, { cache: "no-store" });
+      const headers = authToken ? { "Authorization": `Bearer ${authToken}` } : {};
+      const res = await fetch(`${base}${path}`, { cache: "no-store", headers });
+      if (res.status === 401) {
+        authToken = null;
+        sessionStorage.removeItem(AUTH_KEY);
+        showAuthError("Sitzung abgelaufen. Bitte Seite neu laden.");
+        throw new Error("Unauthorized");
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (!resolvedBase) {
         resolvedBase = base;
@@ -144,17 +156,41 @@ async function fetchFromApi(path) {
       return await res.json();
     } catch (err) {
       lastError = err;
-      resolvedBase = null;
+      if (err.message !== "Unauthorized") resolvedBase = null;
     }
   }
   throw lastError || new Error("Lokale API nicht erreichbar.");
 }
 
-const fetchProducts       = () => fetchFromApi("/products");
-const fetchCustomers      = () => fetchFromApi("/customers");
-const fetchCustomerDetail = id => fetchFromApi(`/customers/${id}`);
-const fetchSophosOverview = () => fetchFromApi("/sophos/overview");
-const fetchBackupStatus   = () => fetchFromApi("/backup/status");
+const fetchProducts        = () => fetchFromApi("/products");
+const fetchCustomers       = () => fetchFromApi("/customers");
+const fetchCustomerDetail  = id => fetchFromApi(`/customers/${id}`);
+const fetchSophosOverview  = () => fetchFromApi("/sophos/overview");
+const fetchBackupStatus    = () => fetchFromApi("/backup/status");
+const fetchBackupAccounts  = () => fetchFromApi("/admin/backup-accounts");
+const fetchBackupChecks    = () => fetchFromApi("/admin/backup-checks");
+
+async function callApi(method, path, body) {
+  const base = resolvedBase;
+  if (!base) throw new Error("API nicht erreichbar");
+  const headers = { "Content-Type": "application/json" };
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  const res = await fetch(`${base}${path}`, {
+    method, headers, cache: "no-store",
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  if (res.status === 401) {
+    authToken = null;
+    sessionStorage.removeItem(AUTH_KEY);
+    showAuthError("Sitzung abgelaufen. Bitte Seite neu laden.");
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 
 function decodeHtml(text) {
   const txt = document.createElement("textarea");
@@ -754,6 +790,7 @@ function renderCustomerDetail(detail) {
 
 function renderBackup(data) {
   elements.content.innerHTML = "";
+  elements.content.appendChild(renderBackupSubTabs());
   const groups = data?.groups ?? [];
 
   if (groups.length === 0) {
@@ -853,6 +890,280 @@ function renderBackup(data) {
 
     elements.content.appendChild(card);
   }
+
+  sendHeight();
+}
+
+// ── Render: Backup Sub-Tabs ───────────────────────────────────────────────────
+
+function renderBackupSubTabs() {
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;gap:2px;margin-bottom:14px;border-bottom:1px solid #1e293b;";
+  [["status", "Übersicht"], ["manage", "Checks verwalten"]].forEach(([key, label]) => {
+    const btn = document.createElement("button");
+    const active = backupSubView === key;
+    btn.style.cssText = `padding:7px 16px;border:none;cursor:pointer;font-size:13px;font-weight:${active ? 600 : 400};color:${active ? "#f1f5f9" : "#64748b"};background:transparent;border-bottom:2px solid ${active ? "#3b82f6" : "transparent"};margin-bottom:-1px;`;
+    btn.textContent = label;
+    btn.addEventListener("click", () => { backupSubView = key; refresh(); });
+    bar.appendChild(btn);
+  });
+  return bar;
+}
+
+// ── Render: Backup Management ─────────────────────────────────────────────────
+
+function renderBackupManagement(accounts, checks) {
+  elements.content.innerHTML = "";
+  elements.content.appendChild(renderBackupSubTabs());
+
+  const accountMap = {};
+  accounts.forEach(a => { accountMap[a.id] = a; });
+
+  // Group checks by account
+  const byAccount = {};
+  accounts.forEach(a => { byAccount[a.id] = []; });
+  checks.forEach(c => { if (byAccount[c.backupAccountId]) byAccount[c.backupAccountId].push(c); });
+
+  let showForm = false;
+  let formAccountId = accounts.length ? String(accounts[0].id) : "";
+  let formName = "";
+  let formSubject = "";
+  let formMatchType = "contains";
+  let formInterval = "24";
+  let formGrace = "1";
+  let formError = "";
+
+  const wrap = document.createElement("div");
+  elements.content.appendChild(wrap);
+
+  function renderForm() {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;";
+    const box = document.createElement("div");
+    box.style.cssText = "background:#1e293b;border-radius:10px;padding:28px 32px;width:420px;border:1px solid #334155;";
+
+    const title = document.createElement("h3");
+    title.style.cssText = "color:#f1f5f9;font-size:16px;font-weight:700;margin:0 0 20px;";
+    title.textContent = "Neuer Backup-Check";
+    box.appendChild(title);
+
+    const inp = (label, value, onChange, type = "text") => {
+      const g = document.createElement("div");
+      g.style.cssText = "margin-bottom:12px;";
+      const l = document.createElement("label");
+      l.style.cssText = "display:block;color:#94a3b8;font-size:12px;margin-bottom:4px;";
+      l.textContent = label;
+      g.appendChild(l);
+      const i = document.createElement("input");
+      i.type = type;
+      i.value = value;
+      i.style.cssText = "width:100%;padding:8px 12px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:14px;box-sizing:border-box;";
+      i.addEventListener("input", () => onChange(i.value));
+      g.appendChild(i);
+      return g;
+    };
+
+    // Account select
+    const accGroup = document.createElement("div");
+    accGroup.style.cssText = "margin-bottom:12px;";
+    const accLabel = document.createElement("label");
+    accLabel.style.cssText = "display:block;color:#94a3b8;font-size:12px;margin-bottom:4px;";
+    accLabel.textContent = "Backup Account";
+    const accSel = document.createElement("select");
+    accSel.style.cssText = "width:100%;padding:8px 12px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:14px;box-sizing:border-box;";
+    accounts.forEach(a => {
+      const opt = document.createElement("option");
+      opt.value = String(a.id);
+      opt.textContent = `${a.name} (${a.fromEmail})`;
+      if (String(a.id) === formAccountId) opt.selected = true;
+      accSel.appendChild(opt);
+    });
+    accSel.addEventListener("change", () => { formAccountId = accSel.value; });
+    accGroup.appendChild(accLabel);
+    accGroup.appendChild(accSel);
+    box.appendChild(accGroup);
+
+    box.appendChild(inp("Name des Checks", formName, v => formName = v));
+    box.appendChild(inp("Betreff-Filter (optional)", formSubject, v => formSubject = v));
+
+    // Match type
+    const mtGroup = document.createElement("div");
+    mtGroup.style.cssText = "margin-bottom:12px;";
+    const mtLabel = document.createElement("label");
+    mtLabel.style.cssText = "display:block;color:#94a3b8;font-size:12px;margin-bottom:4px;";
+    mtLabel.textContent = "Betreff-Übereinstimmung";
+    const mtSel = document.createElement("select");
+    mtSel.style.cssText = accSel.style.cssText;
+    [["contains", "Enthält"], ["exact", "Exakt"]].forEach(([v, l]) => {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = l;
+      if (v === formMatchType) o.selected = true;
+      mtSel.appendChild(o);
+    });
+    mtSel.addEventListener("change", () => { formMatchType = mtSel.value; });
+    mtGroup.appendChild(mtLabel);
+    mtGroup.appendChild(mtSel);
+    box.appendChild(mtGroup);
+
+    // Interval select
+    const intGroup = document.createElement("div");
+    intGroup.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;";
+    const makeNumField = (label, val, setter) => {
+      const g = document.createElement("div");
+      const l = document.createElement("label");
+      l.style.cssText = "display:block;color:#94a3b8;font-size:12px;margin-bottom:4px;";
+      l.textContent = label;
+      const i = document.createElement("input");
+      i.type = "number"; i.min = "1"; i.value = val;
+      i.style.cssText = "width:100%;padding:8px 12px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:14px;box-sizing:border-box;";
+      i.addEventListener("input", () => setter(i.value));
+      g.appendChild(l); g.appendChild(i);
+      return g;
+    };
+    intGroup.appendChild(makeNumField("Intervall (Stunden)", formInterval, v => formInterval = v));
+    intGroup.appendChild(makeNumField("Toleranz (Stunden)", formGrace, v => formGrace = v));
+    box.appendChild(intGroup);
+
+    if (formError) {
+      const err = document.createElement("p");
+      err.style.cssText = "color:#f87171;font-size:12px;background:#7f1d1d;padding:8px 10px;border-radius:5px;margin-bottom:12px;";
+      err.textContent = formError;
+      box.appendChild(err);
+    }
+
+    const btns = document.createElement("div");
+    btns.style.cssText = "display:flex;gap:10px;justify-content:flex-end;";
+
+    const cancel = document.createElement("button");
+    cancel.textContent = "Abbrechen";
+    cancel.style.cssText = "padding:8px 16px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;cursor:pointer;font-size:14px;";
+    cancel.addEventListener("click", () => { overlay.remove(); showForm = false; });
+
+    const save = document.createElement("button");
+    save.textContent = "Speichern";
+    save.style.cssText = "padding:8px 16px;border-radius:6px;border:none;background:#3b82f6;color:#fff;cursor:pointer;font-size:14px;font-weight:600;";
+    save.addEventListener("click", async () => {
+      if (!formName.trim()) { formError = "Name ist erforderlich"; overlay.remove(); renderForm(); return; }
+      save.textContent = "Speichern...";
+      save.disabled = true;
+      try {
+        await callApi("POST", "/admin/backup-checks", {
+          backupAccountId: parseInt(formAccountId),
+          name: formName.trim(),
+          subjectFilter: formSubject.trim() || null,
+          subjectMatchType: formMatchType,
+          intervalHours: parseFloat(formInterval) || 24,
+          graceHours: parseFloat(formGrace) || 1,
+        });
+        overlay.remove();
+        refresh();
+      } catch (e) {
+        formError = e.message;
+        save.textContent = "Speichern";
+        save.disabled = false;
+        overlay.remove();
+        renderForm();
+      }
+    });
+
+    btns.appendChild(cancel);
+    btns.appendChild(save);
+    box.appendChild(btns);
+    overlay.appendChild(box);
+    overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+
+  // "Neuer Check" button
+  const addBtn = document.createElement("button");
+  addBtn.style.cssText = "padding:7px 14px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;font-weight:600;margin-bottom:16px;";
+  addBtn.textContent = "+ Neuer Check";
+  addBtn.addEventListener("click", () => {
+    formName = ""; formSubject = ""; formMatchType = "contains";
+    formInterval = "24"; formGrace = "1"; formError = "";
+    renderForm();
+  });
+  wrap.appendChild(addBtn);
+
+  if (accounts.length === 0) {
+    const empty = document.createElement("p");
+    empty.style.cssText = "color:#64748b;font-size:13px;";
+    empty.textContent = "Keine Backup-Accounts konfiguriert.";
+    wrap.appendChild(empty);
+    sendHeight();
+    return;
+  }
+
+  // Render per account
+  accounts.forEach(account => {
+    const accountChecks = byAccount[account.id] || [];
+
+    const card = document.createElement("div");
+    card.style.cssText = "background:#0f172a;border:1px solid #1e293b;border-radius:8px;margin-bottom:12px;overflow:hidden;";
+
+    const hdr = document.createElement("div");
+    hdr.style.cssText = "padding:10px 14px;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;";
+    const hdrLeft = document.createElement("div");
+    const hdrName = document.createElement("span");
+    hdrName.style.cssText = "color:#f1f5f9;font-size:14px;font-weight:600;";
+    hdrName.textContent = account.name;
+    const hdrEmail = document.createElement("span");
+    hdrEmail.style.cssText = "color:#475569;font-size:11px;margin-left:8px;";
+    hdrEmail.textContent = account.fromEmail;
+    hdrLeft.appendChild(hdrName);
+    hdrLeft.appendChild(hdrEmail);
+    const hdrCount = document.createElement("span");
+    hdrCount.style.cssText = "color:#64748b;font-size:12px;";
+    hdrCount.textContent = `${accountChecks.length} Check${accountChecks.length !== 1 ? "s" : ""}`;
+    hdr.appendChild(hdrLeft);
+    hdr.appendChild(hdrCount);
+    card.appendChild(hdr);
+
+    if (accountChecks.length === 0) {
+      const none = document.createElement("p");
+      none.style.cssText = "color:#475569;font-size:12px;padding:10px 14px;margin:0;";
+      none.textContent = "Keine Checks vorhanden.";
+      card.appendChild(none);
+    } else {
+      accountChecks.forEach(check => {
+        const row = document.createElement("div");
+        row.style.cssText = `display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:12px;padding:9px 14px;border-bottom:1px solid #0f172a;opacity:${check.active ? 1 : 0.5};`;
+
+        const nameEl = document.createElement("span");
+        nameEl.style.cssText = "color:#e2e8f0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+        nameEl.textContent = check.name;
+
+        const interval = document.createElement("span");
+        interval.style.cssText = "color:#64748b;font-size:11px;white-space:nowrap;";
+        interval.textContent = `${check.intervalHours}h`;
+
+        const activeToggle = document.createElement("button");
+        activeToggle.style.cssText = `padding:3px 8px;border-radius:4px;border:1px solid;font-size:11px;cursor:pointer;white-space:nowrap;background:transparent;color:${check.active ? "#4ade80" : "#64748b"};border-color:${check.active ? "#166534" : "#334155"};`;
+        activeToggle.textContent = check.active ? "Aktiv" : "Inaktiv";
+        activeToggle.addEventListener("click", async () => {
+          try { await callApi("PUT", `/admin/backup-checks/${check.id}`, { active: !check.active }); refresh(); }
+          catch (e) { alert(e.message); }
+        });
+
+        const delBtn = document.createElement("button");
+        delBtn.style.cssText = "padding:3px 8px;border-radius:4px;border:1px solid #7f1d1d;background:transparent;color:#ef4444;font-size:11px;cursor:pointer;";
+        delBtn.textContent = "Löschen";
+        delBtn.addEventListener("click", async () => {
+          if (!confirm(`Check "${check.name}" löschen?`)) return;
+          try { await callApi("DELETE", `/admin/backup-checks/${check.id}`); refresh(); }
+          catch (e) { alert(e.message); }
+        });
+
+        row.appendChild(nameEl);
+        row.appendChild(interval);
+        row.appendChild(activeToggle);
+        row.appendChild(delBtn);
+        card.appendChild(row);
+      });
+    }
+
+    wrap.appendChild(card);
+  });
 
   sendHeight();
 }
@@ -1043,6 +1354,7 @@ function setGroupBy(view) {
   groupBy = view;
   currentView = "list";
   selectedCustomerId = null;
+  if (view !== "backup") backupSubView = "status";
   elements.toggleSoftware.classList.toggle("toggle-active", view === "software");
   elements.toggleKunde.classList.toggle("toggle-active", view === "kunde");
   elements.toggleSophos.classList.toggle("toggle-active", view === "sophos");
@@ -1056,8 +1368,13 @@ async function refresh() {
   try {
     clearError();
     if (groupBy === "backup") {
-      const data = await fetchBackupStatus();
-      renderBackup(data);
+      if (backupSubView === "manage") {
+        const [accounts, checks] = await Promise.all([fetchBackupAccounts(), fetchBackupChecks()]);
+        renderBackupManagement(accounts, checks);
+      } else {
+        const data = await fetchBackupStatus();
+        renderBackup(data);
+      }
     } else if (groupBy === "sophos") {
       const data = await fetchSophosOverview();
       renderSophosAlerts(data);
@@ -1078,11 +1395,117 @@ async function refresh() {
   }
 }
 
+// ── Auth UI + Auto-Login ───────────────────────────────────────────────────────
+
+function showAuthError(msg, hint) {
+  elements.content.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "padding:32px 24px;text-align:center;";
+
+  const icon = document.createElement("div");
+  icon.style.cssText = "font-size:36px;margin-bottom:16px;";
+  icon.textContent = "🔒";
+
+  const text = document.createElement("p");
+  text.style.cssText = "color:#f87171;font-size:14px;font-weight:600;margin:0 0 8px;line-height:1.4;";
+  text.textContent = msg;
+
+  const hintEl = document.createElement("p");
+  hintEl.style.cssText = "color:#64748b;font-size:12px;margin:0;line-height:1.5;";
+  hintEl.textContent = hint || "Bitte im Version Checker einen passenden Benutzer anlegen.";
+
+  wrap.appendChild(icon);
+  wrap.appendChild(text);
+  wrap.appendChild(hintEl);
+  elements.content.appendChild(wrap);
+  sendHeight();
+}
+
+async function pingApiBase() {
+  for (const base of API_BASE_CANDIDATES) {
+    try {
+      const res = await fetch(`${base}/auth/users`, { cache: "no-store" });
+      if (res.ok || res.status === 401) {
+        resolvedBase = base;
+        elements.apiSource.textContent = base.replace("/api", "");
+        return base;
+      }
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+async function tryAutoLogin(ninjaUid) {
+  const base = resolvedBase || await pingApiBase();
+  if (!base) {
+    showAuthError(
+      "Version Checker nicht erreichbar.",
+      "Bitte sicherstellen, dass der Server auf localhost:3001 läuft."
+    );
+    return false;
+  }
+
+  try {
+    const loginRes = await fetch(`${base}/auth/ninja-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ninja_uid: ninjaUid }),
+      cache: "no-store",
+    });
+
+    if (loginRes.status === 401) {
+      const data = await loginRes.json().catch(() => ({}));
+      showAuthError(
+        "Kein Version Checker Konto gefunden.",
+        (data.error || "") + " Bitte NinjaOne User Sync in der Benutzerverwaltung ausführen."
+      );
+      return false;
+    }
+
+    if (!loginRes.ok) {
+      showAuthError("Login fehlgeschlagen.", "Bitte Administrator kontaktieren.");
+      return false;
+    }
+
+    const { token } = await loginRes.json();
+    authToken = token;
+    sessionStorage.setItem(AUTH_KEY, token);
+    return true;
+  } catch {
+    showAuthError(
+      "Verbindung zum Version Checker fehlgeschlagen.",
+      "Bitte sicherstellen, dass der Server auf localhost:3001 läuft."
+    );
+    return false;
+  }
+}
+
+async function init() {
+  const params   = new URLSearchParams(window.location.search);
+  const ninjaUid = params.get("ninja_uid");
+
+  if (!authToken) {
+    if (!ninjaUid) {
+      showAuthError(
+        "NinjaOne-Sitzung nicht erkannt.",
+        "Bitte NinjaOne neu laden und das Panel erneut öffnen."
+      );
+      return;
+    }
+    const ok = await tryAutoLogin(ninjaUid);
+    if (!ok) return;
+  }
+
+  refresh();
+  window.setInterval(refresh, REFRESH_INTERVAL_MS);
+}
+
+// ── Startup ───────────────────────────────────────────────────────────────────
+
 elements.toggleSoftware.addEventListener("click", () => setGroupBy("software"));
 elements.toggleKunde.addEventListener("click", () => setGroupBy("kunde"));
 elements.toggleSophos.addEventListener("click", () => setGroupBy("sophos"));
 elements.toggleBackup.addEventListener("click", () => setGroupBy("backup"));
 
-refresh();
-window.setInterval(refresh, REFRESH_INTERVAL_MS);
 window.addEventListener("load", sendHeight);
+init();

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { getAllLatestByTaskType, getSyncHistoryByTask } from '../services/sync-history';
-import { syncNinjaOneCustomers, syncNinjaOneDevices, syncNinjaOneData } from '../services/ninjaone';
+import { syncNinjaOneCustomers, syncNinjaOneDevices, syncNinjaOneData, syncNinjaOneUsers } from '../services/ninjaone';
 import { syncUnifiData } from '../services/unifi';
 import { syncSophosData, syncSophosAlerts } from '../services/sophos';
 import { syncBackupEmails } from '../services/backup-checker';
@@ -93,6 +93,11 @@ router.post('/sync/:integration/:taskType', requireAuth, requireRole('administra
     switch (fullTaskType) {
       case 'ninjaone_customers': { const r = await syncNinjaOneCustomers(triggeredBy); result = r; break; }
       case 'ninjaone_devices':   { const r = await syncNinjaOneDevices(triggeredBy);   result = r; break; }
+      case ('ninjaone_users' as TaskType): {
+        const r = await syncNinjaOneUsers(triggeredBy);
+        result = { synced: r.synced, created: r.created, updated: r.updated };
+        break;
+      }
       case 'unifi_customers':
       case 'unifi_devices': {
         const r = await syncUnifiData(triggeredBy);

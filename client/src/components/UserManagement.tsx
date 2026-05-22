@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  fetchUsers, createUser, updateUser, deactivateUser,
+  fetchUsers, createUser, updateUser, deactivateUser, syncNinjaUsers,
   type ManagedUser,
 } from '../api';
 
@@ -18,11 +18,14 @@ export default function UserManagement() {
 
   const [formUsername, setFormUsername] = useState('');
   const [formDisplayName, setFormDisplayName] = useState('');
+  const [formEmail, setFormEmail] = useState('');
   const [formRole, setFormRole] = useState<'administrator' | 'techniker'>('techniker');
   const [formPassword, setFormPassword] = useState('');
   const [formRemovePassword, setFormRemovePassword] = useState(false);
   const [formError, setFormError] = useState('');
   const [formSaving, setFormSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
   async function load() {
     try {
@@ -41,6 +44,7 @@ export default function UserManagement() {
     setEditUser(null);
     setFormUsername('');
     setFormDisplayName('');
+    setFormEmail('');
     setFormRole('techniker');
     setFormPassword('');
     setFormRemovePassword(false);
@@ -52,6 +56,7 @@ export default function UserManagement() {
     setEditUser(u);
     setFormUsername(u.username);
     setFormDisplayName(u.displayName);
+    setFormEmail(u.email ?? '');
     setFormRole(u.role);
     setFormPassword('');
     setFormRemovePassword(false);
@@ -72,6 +77,7 @@ export default function UserManagement() {
           username: formUsername.trim(),
           display_name: formDisplayName.trim(),
           role: formRole,
+          email: formEmail.trim() || undefined,
           ...(formPassword ? { password: formPassword } : {}),
           ...(formRemovePassword && !formPassword ? { remove_password: true } : {}),
         });
@@ -80,6 +86,7 @@ export default function UserManagement() {
           username: formUsername.trim(),
           display_name: formDisplayName.trim(),
           role: formRole,
+          email: formEmail.trim() || undefined,
           ...(formRole === 'administrator' && formPassword ? { password: formPassword } : {}),
         });
       }
@@ -89,6 +96,20 @@ export default function UserManagement() {
       setFormError((e as Error).message);
     } finally {
       setFormSaving(false);
+    }
+  }
+
+  async function handleNinjaSync() {
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const r = await syncNinjaUsers();
+      setSyncMsg(`✓ ${r.synced} gefunden · ${r.created} neu · ${r.updated} aktualisiert`);
+      load();
+    } catch (e) {
+      setSyncMsg(`Fehler: ${(e as Error).message}`);
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -126,16 +147,34 @@ export default function UserManagement() {
         <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#f1f5f9', margin: 0 }}>
           Benutzerverwaltung
         </h2>
-        <button
-          onClick={openCreate}
-          style={{
-            padding: '8px 16px', borderRadius: '6px', border: 'none',
-            backgroundColor: '#3b82f6', color: '#fff', fontSize: '14px',
-            fontWeight: 600, cursor: 'pointer',
-          }}
-        >
-          + Neuer Benutzer
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {syncMsg && (
+            <span style={{ fontSize: '12px', color: syncMsg.startsWith('Fehler') ? '#f87171' : '#4ade80' }}>
+              {syncMsg}
+            </span>
+          )}
+          <button
+            onClick={handleNinjaSync}
+            disabled={syncing}
+            style={{
+              padding: '8px 16px', borderRadius: '6px', border: '1px solid #334155',
+              backgroundColor: 'transparent', color: '#94a3b8', fontSize: '13px',
+              fontWeight: 600, cursor: syncing ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {syncing ? '⟳ Sync...' : '↓ NinjaOne User Sync'}
+          </button>
+          <button
+            onClick={openCreate}
+            style={{
+              padding: '8px 16px', borderRadius: '6px', border: 'none',
+              backgroundColor: '#3b82f6', color: '#fff', fontSize: '14px',
+              fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            + Neuer Benutzer
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -176,6 +215,19 @@ export default function UserManagement() {
                 value={formDisplayName}
                 onChange={e => setFormDisplayName(e.target.value)}
                 placeholder="z.B. Max Mustermann"
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ marginBottom: '14px' }}>
+              <label style={labelStyle}>
+                E-Mail-Adresse{' '}
+                <span style={{ color: '#475569', fontWeight: 400 }}>(für NinjaOne Auto-Login)</span>
+              </label>
+              <input
+                type="email"
+                value={formEmail}
+                onChange={e => setFormEmail(e.target.value)}
+                placeholder="z.B. max.mustermann@net-factory.de"
                 style={inputStyle}
               />
             </div>
@@ -260,7 +312,7 @@ export default function UserManagement() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid #334155' }}>
-              {['Anzeigename', 'Benutzername', 'Rolle', 'Kennwort', 'Erstellt am', 'Status', ''].map(h => (
+              {['Anzeigename', 'Benutzername', 'E-Mail', 'NinjaOne', 'Rolle', 'Kennwort', 'Erstellt am', 'Status', ''].map(h => (
                 <th key={h} style={{
                   textAlign: 'left', padding: '8px 12px', color: '#64748b',
                   fontSize: '12px', fontWeight: 600, textTransform: 'uppercase',
@@ -280,6 +332,21 @@ export default function UserManagement() {
                   {u.displayName}
                 </td>
                 <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{u.username}</td>
+                <td style={{ padding: '10px 12px', color: u.email ? '#60a5fa' : '#334155', fontSize: '13px' }}>
+                  {u.email ?? '—'}
+                </td>
+                <td style={{ padding: '10px 12px' }}>
+                  {u.ninjaUid ? (
+                    <span style={{
+                      display: 'inline-block', padding: '2px 7px', borderRadius: '4px',
+                      fontSize: '11px', backgroundColor: '#14532d', color: '#4ade80',
+                    }}>
+                      ✓ Verknüpft
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '12px', color: '#334155' }}>—</span>
+                  )}
+                </td>
                 <td style={{ padding: '10px 12px' }}>
                   <span style={{
                     display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '12px',

@@ -135,7 +135,7 @@ export interface CustomProduct {
 export interface MockDevice {
   id: number;
   name: string;
-  product: string;
+  product: string | null;
   currentVersion: string;
   orgId?: number;
   ninjaDeviceId?: number;
@@ -664,6 +664,8 @@ export interface ManagedUser {
   username: string;
   displayName: string;
   role: 'administrator' | 'techniker';
+  email: string | null;
+  ninjaUid: string | null;
   hasPassword: boolean;
   createdAt: string;
   active: number;
@@ -675,7 +677,14 @@ export async function fetchUsers(): Promise<ManagedUser[]> {
   return res.json();
 }
 
-export async function createUser(data: { username: string; display_name: string; role: string; password?: string }): Promise<{ ok: boolean; id: number }> {
+export async function syncNinjaUsers(): Promise<{ synced: number; created: number; updated: number }> {
+  const res = await apiFetch(`${BASE}/sync/ninjaone/users`, { method: 'POST' });
+  if (!res.ok) return throwApiError(res, 'NinjaOne User Sync fehlgeschlagen');
+  const data = await res.json();
+  return { synced: data.synced ?? 0, created: data.created ?? 0, updated: data.updated ?? 0 };
+}
+
+export async function createUser(data: { username: string; display_name: string; role: string; password?: string; email?: string }): Promise<{ ok: boolean; id: number }> {
   const res = await apiFetch(`${BASE}/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -685,7 +694,7 @@ export async function createUser(data: { username: string; display_name: string;
   return res.json();
 }
 
-export async function updateUser(id: number, data: { username?: string; display_name?: string; role?: string; active?: boolean; password?: string; remove_password?: boolean }): Promise<void> {
+export async function updateUser(id: number, data: { username?: string; display_name?: string; role?: string; active?: boolean; password?: string; remove_password?: boolean; email?: string }): Promise<void> {
   const res = await apiFetch(`${BASE}/users/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

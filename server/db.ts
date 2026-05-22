@@ -11,17 +11,11 @@ export function getDb(): Database.Database {
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     initDb();
-    seedMockData();
   }
   return db;
 }
 
 function initDb() {
-  // Check if old schema exists (e.g., mock_customers) BEFORE creating new tables
-  const tablesList = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
-  const hasOldSchema = tablesList.some(t => t.name === 'mock_customers');
-
-  // Create new simplified schema
   db.exec(`
     CREATE TABLE IF NOT EXISTS customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,14 +61,14 @@ function initDb() {
     CREATE TABLE IF NOT EXISTS ninjaone_devices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ninjaone_customer_id INTEGER NOT NULL,
-      product_id TEXT NOT NULL,
+      product_id TEXT,
       external_device_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      current_version TEXT NOT NULL,
+      current_version TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (ninjaone_customer_id) REFERENCES ninjaone_customers(id) ON DELETE CASCADE,
-      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS unifi_customers (
@@ -249,11 +243,6 @@ function initDb() {
   createIndexes();
   migrateBackupSchema();
 
-  // NOW run migration if old schema existed
-  if (hasOldSchema) {
-    console.log('Old schema detected, migration available but skipped for this version');
-    // migrateFromOldSchema();
-  }
 }
 
 function migrateBackupSchema() {
@@ -354,11 +343,50 @@ function createIndexes() {
     }
   }
 
-  // Add password_hash column to users if not exists
+  // Add password_hash / email columns to users if not exists
   const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
   if (userCols.length > 0 && !userCols.some(c => c.name === 'password_hash')) {
     db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT`);
     console.log('[DB] Migrated users: added password_hash column');
+  }
+  if (userCols.length > 0 && !userCols.some(c => c.name === 'email')) {
+    db.exec(`ALTER TABLE users ADD COLUMN email TEXT`);
+    console.log('[DB] Migrated users: added email column');
+  }
+  if (userCols.length > 0 && !userCols.some(c => c.name === 'ninja_uid')) {
+    db.exec(`ALTER TABLE users ADD COLUMN ninja_uid TEXT`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ninja_uid ON users(ninja_uid) WHERE ninja_uid IS NOT NULL`);
+    console.log('[DB] Migrated users: added ninja_uid column');
+  }
+
+  // Make ninjaone_devices.product_id nullable for existing DBs
+  const ninjaDeviceCols = db.prepare('PRAGMA table_info(ninjaone_devices)').all() as Array<{ name: string; notnull: number }>;
+  const productIdCol = ninjaDeviceCols.find(c => c.name === 'product_id');
+  if (productIdCol && productIdCol.notnull === 1) {
+    console.log('[DB] Migrating ninjaone_devices: making product_id nullable...');
+    db.pragma('foreign_keys = OFF');
+    const rebuildTable = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE ninjaone_devices_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ninjaone_customer_id INTEGER NOT NULL,
+          product_id TEXT,
+          external_device_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          current_version TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (ninjaone_customer_id) REFERENCES ninjaone_customers(id) ON DELETE CASCADE,
+          FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+        );
+        INSERT INTO ninjaone_devices_new SELECT * FROM ninjaone_devices;
+        DROP TABLE ninjaone_devices;
+        ALTER TABLE ninjaone_devices_new RENAME TO ninjaone_devices;
+      `);
+    });
+    rebuildTable();
+    db.pragma('foreign_keys = ON');
+    console.log('[DB] Migrated ninjaone_devices: product_id is now nullable');
   }
 
   // Add hostname column to sophos_devices if it doesn't exist yet
@@ -366,203 +394,5 @@ function createIndexes() {
   if (sophosDeviceCols.length > 0 && !sophosDeviceCols.some(c => c.name === 'hostname')) {
     db.exec(`ALTER TABLE sophos_devices ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`);
     console.log('[DB] Migrated sophos_devices: added hostname column');
-  }
-}
-
-function migrateFromOldSchema() {
-  console.log('Migrating from old schema...');
-
-  try {
-    // Migration transaction
-    const transaction = db.transaction(() => {
-      // Migrate customers
-      const oldCustomers = db.prepare('SELECT id, name FROM mock_customers').all() as Array<{ id: number; name: string }>;
-      const insertCustomer = db.prepare('INSERT OR IGNORE INTO customers (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)');
-      const now = new Date().toISOString();
-
-      for (const oldCust of oldCustomers) {
-        insertCustomer.run(oldCust.id, oldCust.name, now, now);
-      }
-
-      // Migrate products
-      const insertProduct = db.prepare('INSERT OR IGNORE INTO products (id, name, type, active, created_at) VALUES (?, ?, ?, ?, ?)');
-      const oldScraperProducts = db.prepare('SELECT product, active FROM scraper_products').all() as Array<{ product: string; active: number }>;
-
-      for (const prod of oldScraperProducts) {
-        insertProduct.run(prod.product, prod.product, 'scraped', prod.active, now);
-      }
-
-      // Migrate version cache to product_versions
-      const insertVersion = db.prepare('INSERT OR IGNORE INTO product_versions (product_id, version, source, release_url, checked_at) VALUES (?, ?, ?, ?, ?)');
-      const versionCache = db.prepare('SELECT product, latest_version, release_url, checked_at FROM version_cache').all() as Array<{
-        product: string;
-        latest_version: string;
-        release_url: string;
-        checked_at: string;
-      }>;
-
-      for (const vc of versionCache) {
-        insertVersion.run(vc.product, vc.latest_version, 'scraper', vc.release_url || null, vc.checked_at);
-      }
-
-      // Migrate devices to appropriate tables
-      const oldDevices = db.prepare(
-        'SELECT id, customer_id, name, product, current_version, org_id, ninja_device_id, source FROM mock_devices'
-      ).all() as Array<{
-        id: number;
-        customer_id: number;
-        name: string;
-        product: string;
-        current_version: string;
-        org_id: number | null;
-        ninja_device_id: number | null;
-        source: string;
-      }>;
-
-      const insertNinjaOneCustomer = db.prepare(
-        'INSERT OR IGNORE INTO ninjaone_customers (customer_id, ninja_org_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
-      );
-      const insertNinjaOneDevice = db.prepare(
-        'INSERT INTO ninjaone_devices (ninjaone_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      );
-
-      // Group devices by customer and source
-      for (const device of oldDevices) {
-        if (device.source === 'manual' || device.org_id) {
-          // NinjaOne device
-          const existingNinjaOneCustomer = db
-            .prepare('SELECT id FROM ninjaone_customers WHERE customer_id = ?')
-            .get(device.customer_id) as { id: number } | undefined;
-
-          let ninjaOneCustomerId: number;
-          if (!existingNinjaOneCustomer) {
-            const result = insertNinjaOneCustomer.run(device.customer_id, `ORG-${device.customer_id}`, `NinjaOne-${device.customer_id}`, now, now);
-            ninjaOneCustomerId = result.lastInsertRowid as number;
-          } else {
-            ninjaOneCustomerId = existingNinjaOneCustomer.id;
-          }
-
-          insertNinjaOneDevice.run(ninjaOneCustomerId, device.product, `ninja-${device.id}`, device.name, device.current_version, now, now);
-        }
-      }
-    });
-
-    transaction();
-    console.log('Migration completed successfully');
-  } catch (error) {
-    console.error('Migration error:', error);
-    throw error;
-  }
-}
-
-function seedMockData() {
-  const customerCount = (db.prepare('SELECT COUNT(*) as cnt FROM customers').get() as { cnt: number }).cnt;
-
-  if (customerCount === 0) {
-    const now = new Date().toISOString();
-
-    const mockCustomers = [
-      { name: 'Mustermann GmbH' },
-      { name: 'TechStart AG' },
-      { name: 'Kanzlei Weber' },
-      { name: 'Praxis Dr. Schmidt' },
-    ];
-
-    const mockNinjaOneDevices: Array<{ customerIdx: number; name: string; product: string; currentVersion: string }> = [
-      { customerIdx: 0, name: 'NAS-01', product: 'synology-dsm', currentVersion: '7.1.1' },
-      { customerIdx: 0, name: 'FW-01', product: 'sophos-firewall', currentVersion: '19.5.3' },
-      { customerIdx: 0, name: 'TV-01', product: 'teamviewer', currentVersion: '15.51.6' },
-      { customerIdx: 1, name: 'PVE-01', product: 'proxmox-ve', currentVersion: '8.0.4' },
-      { customerIdx: 1, name: 'PBS-01', product: 'proxmox-backup', currentVersion: '3.0.2' },
-      { customerIdx: 1, name: 'NAS-02', product: 'synology-dsm', currentVersion: '7.2.0' },
-      { customerIdx: 2, name: 'FW-02', product: 'sophos-firewall', currentVersion: '19.0.1' },
-      { customerIdx: 2, name: 'TV-02', product: 'teamviewer', currentVersion: '15.70.3' },
-      { customerIdx: 3, name: 'NAS-03', product: 'synology-dsm', currentVersion: '7.0.1' },
-      { customerIdx: 3, name: 'PVE-02', product: 'proxmox-ve', currentVersion: '7.4.3' },
-      { customerIdx: 3, name: 'TV-03', product: 'teamviewer', currentVersion: '15.74.6' },
-    ];
-
-    const mockUnifiDevices: Array<{ customerIdx: number; name: string; product: string; currentVersion: string }> = [
-      { customerIdx: 0, name: 'UNIFI-01', product: 'unifi-network', currentVersion: '7.5.187' },
-      { customerIdx: 2, name: 'UNIFI-02', product: 'unifi-network', currentVersion: '7.4.162' },
-    ];
-
-    const transaction = db.transaction(() => {
-      // Insert products
-      const insertProduct = db.prepare('INSERT OR IGNORE INTO products (id, name, type, active, created_at) VALUES (?, ?, ?, ?, ?)');
-      const products = [
-        'synology-dsm',
-        'sophos-firewall',
-        'teamviewer',
-        'proxmox-ve',
-        'proxmox-backup',
-        'unifi-network',
-      ];
-
-      for (const prodId of products) {
-        insertProduct.run(prodId, prodId, 'scraped', 1, now);
-      }
-
-      // Insert customers
-      const insertCustomer = db.prepare('INSERT INTO customers (name, created_at, updated_at) VALUES (?, ?, ?)');
-      const customerIds: number[] = [];
-
-      for (const cust of mockCustomers) {
-        const result = insertCustomer.run(cust.name, now, now);
-        customerIds.push(result.lastInsertRowid as number);
-      }
-
-      // Insert NinjaOne customers and devices
-      const insertNinjaOneCustomer = db.prepare('INSERT INTO ninjaone_customers (customer_id, ninja_org_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
-      const insertNinjaOneDevice = db.prepare(
-        'INSERT INTO ninjaone_devices (ninjaone_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      );
-
-      const ninjaOneCustomerIds: { [key: number]: number } = {};
-
-      for (let i = 0; i < customerIds.length; i++) {
-        const result = insertNinjaOneCustomer.run(customerIds[i], `ORG-${i + 1}`, `NinjaOne ${mockCustomers[i].name}`, now, now);
-        ninjaOneCustomerIds[i] = result.lastInsertRowid as number;
-      }
-
-      for (const device of mockNinjaOneDevices) {
-        insertNinjaOneDevice.run(
-          ninjaOneCustomerIds[device.customerIdx],
-          device.product,
-          `ninja-dev-${Math.random().toString(36).substr(2, 9)}`,
-          device.name,
-          device.currentVersion,
-          now,
-          now
-        );
-      }
-
-      // Insert Unifi customers and devices
-      const insertUnifiCustomer = db.prepare('INSERT INTO unifi_customers (customer_id, unifi_customer_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
-      const insertUnifiDevice = db.prepare(
-        'INSERT INTO unifi_devices (unifi_customer_id, product_id, external_device_id, name, current_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      );
-
-      const unifiCustomerIds: { [key: number]: number } = {};
-
-      for (let i = 0; i < customerIds.length; i++) {
-        const result = insertUnifiCustomer.run(customerIds[i], `UNI-${i + 1}`, `Unifi ${mockCustomers[i].name}`, now, now);
-        unifiCustomerIds[i] = result.lastInsertRowid as number;
-      }
-
-      for (const device of mockUnifiDevices) {
-        insertUnifiDevice.run(
-          unifiCustomerIds[device.customerIdx],
-          device.product,
-          `unifi-dev-${Math.random().toString(36).substr(2, 9)}`,
-          device.name,
-          device.currentVersion,
-          now,
-          now
-        );
-      }
-    });
-
-    transaction();
   }
 }

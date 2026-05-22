@@ -262,18 +262,18 @@ function TaskRow({ label, status, taskType, onSync, canSync }: {
           )}
           {canSync && (
             <button onClick={handleSync} disabled={syncing || status.status === 'running'}
-              style={{ padding: '2px 8px', borderRadius: '4px', border: 'none', backgroundColor: (syncing || status.status === 'running') ? '#1e3a5f' : '#1e40af', color: '#93c5fd', fontSize: '11px', cursor: (syncing || status.status === 'running') ? 'not-allowed' : 'pointer' }}>
+              style={{ padding: '4px 14px', borderRadius: '6px', border: 'none', backgroundColor: (syncing || status.status === 'running') ? '#1e3a5f' : '#3b82f6', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: (syncing || status.status === 'running') ? 'not-allowed' : 'pointer' }}>
               {syncing ? '...' : 'Sync'}
             </button>
           )}
           {canSync && (
             <button onClick={() => setEditingCron(true)} title="Zeitplan bearbeiten"
-              style={{ padding: '2px 8px', borderRadius: '4px', border: '1px solid #334155', backgroundColor: 'transparent', color: '#64748b', fontSize: '11px', cursor: 'pointer' }}>
+              style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid #334155', backgroundColor: 'transparent', color: '#64748b', fontSize: '16px', cursor: 'pointer', lineHeight: 1 }}>
               ⏱
             </button>
           )}
           <button onClick={loadHistory}
-            style={{ padding: '2px 6px', borderRadius: '4px', border: '1px solid #334155', backgroundColor: 'transparent', color: '#475569', fontSize: '11px', cursor: 'pointer' }}>
+            style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid #334155', backgroundColor: 'transparent', color: '#475569', fontSize: '16px', cursor: 'pointer', lineHeight: 1 }}>
             {loadingHistory ? '...' : expanded ? '▲' : '▼'}
           </button>
         </div>

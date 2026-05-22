@@ -14,7 +14,7 @@ function closePanel() {
   if (backdrop) backdrop.remove();
 }
 
-function buildPanel() {
+async function buildPanel() {
   const panel = document.createElement('div');
   panel.id = PANEL_ID;
   Object.assign(panel.style, {
@@ -62,7 +62,9 @@ function buildPanel() {
   // Widget iframe (fills the panel)
   const frame = document.createElement('iframe');
   const runtimeAPI = typeof browser !== 'undefined' ? browser : chrome;
-  frame.src = runtimeAPI.runtime.getURL('widget.html');
+  const ninjaUid = await getNinjaUid();
+  const widgetBase = runtimeAPI.runtime.getURL('widget.html');
+  frame.src = ninjaUid ? `${widgetBase}?ninja_uid=${encodeURIComponent(ninjaUid)}` : widgetBase;
   frame.title = 'NetFactory Monitoring';
   Object.assign(frame.style, { flex: '1', width: '100%', border: '0', display: 'block' });
   panel.appendChild(frame);
@@ -120,6 +122,27 @@ function buildSidebarButton() {
     }
   });
   return btn;
+}
+
+// ── NinjaOne User Detection via sessionproperties ─────────────────────────────
+
+let cachedNinjaUid = null;
+
+async function getNinjaUid() {
+  if (cachedNinjaUid) return cachedNinjaUid;
+  try {
+    const res = await fetch(
+      `${window.location.origin}/ws/webapp/sessionproperties`,
+      { credentials: 'include', cache: 'no-store' }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const uid = data.appUserUid || data.userUid || null;
+    if (uid) cachedNinjaUid = uid;
+    return uid;
+  } catch {
+    return null;
+  }
 }
 
 // ── Sidebar Injection ──────────────────────────────────────────────────────────

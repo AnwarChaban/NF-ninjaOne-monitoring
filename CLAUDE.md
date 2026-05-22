@@ -48,7 +48,8 @@ Full-stack TypeScript monorepo — Express backend + React/Vite frontend, single
 - `services/comparator.ts` — Semver comparison with vendor-specific normalization
 - `services/notifier.ts` — Console, webhook, and Slack notifications
 - `middleware/auth.ts` — `requireAuth` (validates Bearer token, attaches `req.user`) and `requireRole('administrator'|'techniker')`
-- `scrapers/` — One file per product. **UniFi has no scraper** — its version comes from the API sync.
+- `scrapers/` — One file per product: `proxmox-ve`, `proxmox-backup`, `sophos`, `synology`, `teamviewer`. **UniFi has no scraper** — its version comes from the API sync.
+- `mocks/ninjaone-data.ts` — Mock NinjaOne API response data used during development.
 - `routes/users.ts` — Public: `POST /api/auth/setup` (first-run only), `GET /api/auth/users`, `POST /api/auth/login`, `POST /api/auth/logout`. Admin-only: `/api/users` CRUD
 - `routes/logs.ts` — `GET /api/logs` + `GET /api/logs/meta` (admin only)
 - `routes/sync.ts` — `GET /api/sync/status`, `GET /api/sync/history/:integration`, `POST /api/sync/:integration` (admin only)
@@ -103,7 +104,12 @@ Backup monitoring: `backup_accounts`, `backup_checks`, `backup_check_results`
 - `components/SyncOverview.tsx` — 4 cards (NinjaOne/UniFi/Sophos/Backup) with status, last run, expandable history, manual sync button. Auto-refreshes 30s.
 - `components/AuditLogs.tsx` — Paginated log table with filters (date, user, action, entity type) and CSV export.
 - `components/UserManagement.tsx` — User CRUD. Password field shown only for administrator role.
+- `components/admin/BackupChecksPage.tsx` — Backup check configuration CRUD (account + schedule management).
+- `components/admin/CustomersPage.tsx` — Customer management.
+- `components/admin/ProductsPage.tsx` — Product registry management (enable/disable, add custom products).
 - `components/admin/SettingsPage.tsx` — Inline `ExpiryRow` component next to each Client Secret field for setting/displaying expiry dates.
+- `components/admin/SophosPage.tsx` — Sophos tenant-to-customer matching and unmatched tenant management.
+- `components/admin/UnifiPage.tsx` — UniFi host-to-customer matching and manual mapping management.
 - `api.ts` — All API calls go through `apiFetch()` which auto-injects `Authorization: Bearer` header. `getStoredUser()` / `setAuthSession()` / `clearAuthSession()` manage localStorage.
 
 ### Browser Extension (`browser-extension/ninja-widget-injector/`)

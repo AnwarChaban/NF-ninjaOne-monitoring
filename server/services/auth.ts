@@ -9,13 +9,14 @@ export interface AuthUser {
   role: 'administrator' | 'techniker';
 }
 
-const SESSION_DURATION_DAYS = 30;
+const SESSION_DURATION_MS_DEFAULT = 30 * 24 * 60 * 60 * 1000; // 30 days
+export const SESSION_DURATION_MS_APP   = 30 * 60 * 1000;          // 30 minutes
 
-export function createSession(userId: number, ipAddress?: string, userAgent?: string): string {
+export function createSession(userId: number, ipAddress?: string, userAgent?: string, durationMs = SESSION_DURATION_MS_DEFAULT): string {
   const db = getDb();
   const token = crypto.randomBytes(32).toString('hex');
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(now.getTime() + durationMs);
 
   db.prepare(`
     INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, created_at, expires_at)
