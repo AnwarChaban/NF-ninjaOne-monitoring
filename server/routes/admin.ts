@@ -12,6 +12,7 @@ import { syncNinjaOneData, fetchNinjaOneBackups } from '../services/ninjaone';
 import { syncUnifiData } from '../services/unifi';
 import { syncSophosData, syncSophosAlerts, fetchTenantsFromApi } from '../services/sophos';
 import { productNames } from '../services/version-fetcher';
+import { compareVersions } from '../services/comparator';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { logAction } from '../services/audit';
 
@@ -730,6 +731,66 @@ router.post('/admin/sophos/sync-alerts', async (req, res) => {
 
 // --- UniFi Mappings ---
 
+router.get('/admin/unifi/customers', (_req, res) => {
+  const db = getDb();
+
+  // Customers that were matched during the last sync
+  const synced = db.prepare(`
+    SELECT uc.id, uc.customer_id as customerId, uc.unifi_customer_id as unifiCustomerId,
+           uc.name as hostName, c.name as customerName
+    FROM unifi_customers uc
+    JOIN customers c ON uc.customer_id = c.id
+    ORDER BY c.name
+  `).all() as Array<{ id: number; customerId: number; unifiCustomerId: string; hostName: string; customerName: string }>;
+
+  const syncedCustomerIds = new Set(synced.map(s => s.customerId));
+
+  const result = synced.map(uc => {
+    const devices = db.prepare(`
+      SELECT id, name, product_id as productId, current_version as currentVersion
+      FROM unifi_devices
+      WHERE unifi_customer_id = ?
+      ORDER BY name
+    `).all(uc.id) as Array<{ id: number; name: string; productId: string; currentVersion: string }>;
+
+    const devicesWithStatus = devices.map(d => {
+      const latest = getLatestVersion(d.productId);
+      const latestVersion = latest?.version ?? '';
+      const status = latestVersion ? compareVersions(d.currentVersion, latestVersion, d.productId).status : 'unknown';
+      return { ...d, latestVersion, status };
+    });
+
+    return { ...uc, pendingSync: false, devices: devicesWithStatus };
+  });
+
+  // Customers that have a manual mapping but are not yet in unifi_customers (pending sync)
+  const pendingMapped = db.prepare(`
+    SELECT DISTINCT c.id as customerId, c.name as customerName,
+           GROUP_CONCAT(ucm.match_text, '|||') as mappingTexts
+    FROM unifi_customer_mappings ucm
+    JOIN customers c ON ucm.customer_id = c.id
+    GROUP BY c.id
+    ORDER BY c.name
+  `).all() as Array<{ customerId: number; customerName: string; mappingTexts: string }>;
+
+  for (const p of pendingMapped) {
+    if (!syncedCustomerIds.has(p.customerId)) {
+      result.push({
+        id: -1,
+        customerId: p.customerId,
+        unifiCustomerId: '',
+        hostName: p.mappingTexts,
+        customerName: p.customerName,
+        pendingSync: true,
+        devices: [],
+      } as any);
+    }
+  }
+
+  result.sort((a, b) => (a as any).customerName.localeCompare((b as any).customerName));
+  res.json(result);
+});
+
 router.get('/admin/unifi/mappings', (_req, res) => {
   const db = getDb();
   const mappings = db.prepare(`
@@ -762,10 +823,17 @@ router.post('/admin/unifi/mappings', (req, res) => {
     const result = db
       .prepare('INSERT INTO unifi_customer_mappings (match_text, customer_id, created_at) VALUES (?, ?, ?)')
       .run(matchText, customerId, now);
+    db.prepare('DELETE FROM unifi_unmatched_hosts WHERE host_name = ?').run(matchText);
     logAction(req.user!, 'unifi_mapping.create', 'unifi_mapping', Number(result.lastInsertRowid), matchText, { customerId }, req);
     res.json({ ok: true, id: result.lastInsertRowid });
-  } catch {
-    res.status(409).json({ error: 'Mapping for this match text already exists' });
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    if (msg.includes('UNIQUE') || msg.includes('unique')) {
+      res.status(409).json({ error: 'Mapping for this match text already exists' });
+    } else {
+      console.error('[UniFi mapping] INSERT error:', msg);
+      res.status(500).json({ error: `Mapping konnte nicht gespeichert werden: ${msg}` });
+    }
   }
 });
 

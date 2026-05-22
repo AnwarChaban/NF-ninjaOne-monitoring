@@ -132,7 +132,7 @@ export interface CustomProduct {
   updatedAt: string;
 }
 
-export interface MockDevice {
+export interface CustomerDevice {
   id: number;
   name: string;
   product: string | null;
@@ -141,10 +141,10 @@ export interface MockDevice {
   ninjaDeviceId?: number;
 }
 
-export interface MockCustomer {
+export interface Customer {
   id: number;
   name: string;
-  devices: MockDevice[];
+  devices: CustomerDevice[];
 }
 
 export interface UnifiCustomerMapping {
@@ -161,6 +161,23 @@ export interface UnifiUnmatchedHost {
   hostName: string;
   reason: string;
   syncedAt: string;
+}
+
+export interface UnifiCustomerEntry {
+  id: number;
+  customerId: number;
+  customerName: string;
+  unifiCustomerId: string;
+  hostName: string;
+  pendingSync: boolean;
+  devices: Array<{
+    id: number;
+    name: string;
+    productId: string;
+    currentVersion: string;
+    latestVersion: string;
+    status: string;
+  }>;
 }
 
 // --- Admin: Scraper Products ---
@@ -219,7 +236,7 @@ export async function deleteCustomProduct(id: string): Promise<void> {
 
 // --- Admin: Customers ---
 
-export async function fetchCustomers(): Promise<MockCustomer[]> {
+export async function fetchCustomers(): Promise<Customer[]> {
   const res = await apiFetch(`${BASE}/admin/customers`);
   if (!res.ok) throw new Error('Failed to fetch customers');
   return res.json();
@@ -295,6 +312,12 @@ export async function triggerUnifiSync(): Promise<{
     const message = (error as Error)?.message?.trim();
     throw new Error(message || 'Failed to sync UniFi data (network error)');
   }
+}
+
+export async function fetchUnifiCustomers(): Promise<UnifiCustomerEntry[]> {
+  const res = await apiFetch(`${BASE}/admin/unifi/customers`);
+  if (!res.ok) throw new Error('Failed to fetch UniFi customers');
+  return res.json();
 }
 
 export async function fetchUnifiMappings(): Promise<UnifiCustomerMapping[]> {
@@ -454,7 +477,7 @@ export async function deleteDevice(id: number): Promise<void> {
 
 // --- Backup ---
 
-export type BackupStatus = 'success' | 'failed' | 'missed' | 'unknown';
+export type BackupStatus = 'success' | 'failed' | 'missed' | 'unknown' | 'paused';
 
 export interface BackupAccount {
   id: number;
@@ -478,6 +501,15 @@ export interface BackupCheckDef {
   bodyFilter: string | null;
   active: boolean;
   createdAt: string;
+  paused: boolean;
+  pausedAt: string | null;
+  pausedBy: number | null;
+  pausedReason: string | null;
+  pausedUntil: string | null;
+  manualStatus: 'success' | 'failed' | 'missed' | 'unknown' | null;
+  manualStatusSetAt: string | null;
+  manualStatusSetBy: number | null;
+  manualStatusComment: string | null;
 }
 
 export interface BackupCheckStatus extends BackupCheckDef {
@@ -564,6 +596,37 @@ export async function updateBackupCheck(id: number, data: Partial<Omit<BackupChe
 export async function deleteBackupCheck(id: number): Promise<void> {
   const res = await apiFetch(`${BASE}/admin/backup-checks/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete backup check');
+}
+
+export async function setBackupCheckManualStatus(
+  id: number,
+  status: 'success' | 'failed' | 'missed' | 'unknown' | null,
+  comment?: string | null,
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/admin/backup-checks/${id}/manual-status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, comment: comment ?? null }),
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to set manual status');
+}
+
+export async function pauseBackupCheck(
+  id: number,
+  reason: string,
+  pausedUntil?: string | null,
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/admin/backup-checks/${id}/pause`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason, pausedUntil: pausedUntil ?? null }),
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to pause backup check');
+}
+
+export async function resumeBackupCheck(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/admin/backup-checks/${id}/resume`, { method: 'POST' });
+  if (!res.ok) return throwApiError(res, 'Failed to resume backup check');
 }
 
 // --- Customer Overview & Detail ---

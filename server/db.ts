@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'versions.db');
+const DB_PATH = path.join(process.cwd(), 'data', 'versions.db');
 
 let db: Database.Database;
 
@@ -394,5 +394,25 @@ function createIndexes() {
   if (sophosDeviceCols.length > 0 && !sophosDeviceCols.some(c => c.name === 'hostname')) {
     db.exec(`ALTER TABLE sophos_devices ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`);
     console.log('[DB] Migrated sophos_devices: added hostname column');
+  }
+
+  // Add paused/manual_status columns to backup_checks
+  const backupCheckCols = db.prepare('PRAGMA table_info(backup_checks)').all() as Array<{ name: string }>;
+  if (backupCheckCols.length > 0) {
+    const addCol = (col: string, def: string) => {
+      if (!backupCheckCols.some(c => c.name === col)) {
+        db.exec(`ALTER TABLE backup_checks ADD COLUMN ${col} ${def}`);
+      }
+    };
+    addCol('paused', 'INTEGER NOT NULL DEFAULT 0');
+    addCol('paused_at', 'TEXT');
+    addCol('paused_by', 'INTEGER');
+    addCol('paused_reason', 'TEXT');
+    addCol('paused_until', 'TEXT');
+    addCol('manual_status', 'TEXT');
+    addCol('manual_status_set_at', 'TEXT');
+    addCol('manual_status_set_by', 'INTEGER');
+    addCol('manual_status_comment', 'TEXT');
+    console.log('[DB] Migrated backup_checks: paused/manual_status columns ensured');
   }
 }

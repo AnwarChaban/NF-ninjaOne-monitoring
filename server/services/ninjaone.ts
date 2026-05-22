@@ -620,6 +620,3 @@ export async function getCustomers(): Promise<Customer[]> {
   return await fetchFromNinjaOne();
 }
 
-export function isUsingMockData(): boolean {
-  return false;
-}

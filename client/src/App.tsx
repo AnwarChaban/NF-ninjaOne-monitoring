@@ -33,7 +33,6 @@ function useHash() {
 function Dashboard() {
   const [products, setProducts] = useState<ProductStatus[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mockMode, setMockMode] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [showUpToDateDevices, setShowUpToDateDevices] = useState(false);
@@ -55,7 +54,6 @@ function Dashboard() {
   async function loadSettings() {
     try {
       const settings = await fetchSettings();
-      setMockMode(settings.mockMode === 'false');
       setShowUpToDateDevices(settings.showUpToDateDevices === 'true');
     } catch {
       // ignore
@@ -157,7 +155,7 @@ function Dashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9' }}>
-              Version Checker
+              NetFactory Monitoring
             </h1>
             <p style={{ color: '#64748b', fontSize: '14px', marginTop: '4px' }}>
               {totalDevices} Geräte überwacht
@@ -299,7 +297,7 @@ export default function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <ExpiryBanner />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-      <Sidebar activeView={activeView} />
+      <Sidebar activeView={activeView} currentUser={currentUser} onLogout={handleLogout} />
       <main style={{ flex: 1, overflowY: 'auto' }}>
         {isBackup && <BackupPage />}
         {isSophos && <SophosDashboard />}

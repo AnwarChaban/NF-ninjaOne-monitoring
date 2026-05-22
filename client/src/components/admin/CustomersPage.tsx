@@ -3,9 +3,7 @@ import {
   fetchCustomers, createCustomer, updateCustomer, deleteCustomer,
   createDevice, updateDevice, deleteDevice,
   fetchScraperProducts, fetchCustomProducts, triggerNinjaSync,
-  fetchBackupAccounts, createBackupAccount, deleteBackupAccount,
-  type MockCustomer, type MockDevice, type ScraperProduct, type CustomProduct,
-  type BackupAccount,
+  type Customer, type CustomerDevice, type ScraperProduct, type CustomProduct,
 } from '../../api';
 
 const inputStyle: React.CSSProperties = {
@@ -27,15 +25,15 @@ interface GroupedDevice {
   name: string;
   orgId?: number;
   ninjaDeviceId?: number;
-  entries: MockDevice[];
+  entries: CustomerDevice[];
 }
 
-function isUnknownEntry(device: MockDevice): boolean {
+function isUnknownEntry(device: CustomerDevice): boolean {
   if (!device.product) return false;
   return device.product.toLowerCase() === 'unknown' && device.currentVersion.toLowerCase() === 'unknown';
 }
 
-function groupDevices(devices: MockDevice[]): GroupedDevice[] {
+function groupDevices(devices: CustomerDevice[]): GroupedDevice[] {
   const map = new Map<string, GroupedDevice>();
 
   for (const device of devices) {
@@ -72,19 +70,17 @@ function groupDevices(devices: MockDevice[]): GroupedDevice[] {
 }
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<MockCustomer[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<string[]>([]);
   const [newName, setNewName] = useState('');
   const [editingCustomer, setEditingCustomer] = useState<{ id: number; name: string } | null>(null);
   const [expandedCustomers, setExpandedCustomers] = useState<Record<number, boolean>>({});
   const [addingDevice, setAddingDevice] = useState<number | null>(null);
   const [deviceForm, setDeviceForm] = useState<{ name: string; versions: Record<string, string> }>({ name: '', versions: {} });
-  const [editingDevice, setEditingDevice] = useState<(MockDevice & { customerId: number }) | null>(null);
+  const [editingDevice, setEditingDevice] = useState<(CustomerDevice & { customerId: number }) | null>(null);
   const [expandedDevices, setExpandedDevices] = useState<Record<string, boolean>>({});
   const [isSyncingNinja, setIsSyncingNinja] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [backupAccounts, setBackupAccounts] = useState<BackupAccount[]>([]);
-  const [backupAccountForms, setBackupAccountForms] = useState<Record<number, { fromEmail: string; name: string }>>({});
   const hasAutoSyncedRef = useRef(false);
   const [addingProductForDevice, setAddingProductForDevice] = useState<{
     customerId: number;
@@ -97,29 +93,13 @@ export default function CustomersPage() {
   } | null>(null);
 
   async function load() {
-    const [c, sp, cp, bAccounts] = await Promise.all([
+    const [c, sp, cp] = await Promise.all([
       fetchCustomers().catch(() => [] as typeof customers),
       fetchScraperProducts().catch(() => [] as ScraperProduct[]),
       fetchCustomProducts().catch(() => [] as CustomProduct[]),
-      fetchBackupAccounts().catch(() => [] as BackupAccount[]),
     ]);
     setCustomers(c);
     setProducts([...sp.map(p => p.product), ...cp.map(p => p.id)]);
-    setBackupAccounts(bAccounts);
-  }
-
-  async function handleCreateBackupAccount(customerId: number) {
-    const form = backupAccountForms[customerId];
-    if (!form?.fromEmail || !form?.name) return;
-    await createBackupAccount(customerId, { fromEmail: form.fromEmail, name: form.name });
-    setBackupAccountForms(prev => { const next = { ...prev }; delete next[customerId]; return next; });
-    load();
-  }
-
-  async function handleDeleteBackupAccount(customerId: number) {
-    if (!confirm('Backup-Account löschen? Alle zugehörigen Checks werden ebenfalls gelöscht.')) return;
-    await deleteBackupAccount(customerId);
-    load();
   }
 
   function toggleExpandedDevice(key: string) {
@@ -307,19 +287,6 @@ export default function CustomersPage() {
                 <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 400, marginLeft: '8px' }}>
                   ({groupedDevices.length} Geräte)
                 </span>
-                {(() => {
-                  const account = backupAccounts.find(a => a.customerId === customer.id);
-                  return account ? (
-                    <span style={{
-                      fontSize: '11px', fontWeight: 500, color: '#6ee7b7',
-                      backgroundColor: '#064e3b', borderRadius: '4px',
-                      padding: '2px 7px', marginLeft: '4px',
-                      fontFamily: 'monospace', letterSpacing: '0.01em',
-                    }}>
-                      ✉ {account.fromEmail}
-                    </span>
-                  ) : null;
-                })()}
               </div>
               <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
                 <button style={ghostBtn} onClick={() => setEditingCustomer({ id: customer.id, name: customer.name })}>Bearbeiten</button>
@@ -327,58 +294,6 @@ export default function CustomersPage() {
               </div>
             </div>
           )}
-
-          {/* Backup Account — inline, direkt nach Header */}
-          {isCustomerExpanded && (() => {
-            const account = backupAccounts.find(a => a.customerId === customer.id);
-            const form = backupAccountForms[customer.id];
-            return (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '8px',
-                padding: '8px 0 10px', marginBottom: '8px',
-                borderBottom: '1px solid #1e293b', flexWrap: 'wrap',
-              }}>
-                <span style={{ color: '#475569', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', minWidth: '90px' }}>
-                  Backup FROM
-                </span>
-                {account ? (
-                  <>
-                    <span style={{
-                      fontSize: '12px', color: '#6ee7b7', fontFamily: 'monospace',
-                      backgroundColor: '#064e3b', borderRadius: '4px', padding: '2px 8px',
-                    }}>
-                      {account.fromEmail}
-                    </span>
-                    <button
-                      style={{ ...dangerBtn, padding: '3px 8px', fontSize: '11px' }}
-                      onClick={() => handleDeleteBackupAccount(customer.id)}
-                    >
-                      ✕
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <input
-                      style={{ ...inputStyle, width: '240px', fontSize: '12px', padding: '4px 8px' }}
-                      placeholder="FROM-Adresse (z.B. HdL@monitor.nf-hosting.de)"
-                      value={form?.fromEmail ?? ''}
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => setBackupAccountForms(prev => ({
-                        ...prev,
-                        [customer.id]: { fromEmail: e.target.value, name: prev[customer.id]?.name ?? customer.name },
-                      }))}
-                    />
-                    <button
-                      style={{ ...primaryBtn, padding: '4px 10px', fontSize: '12px' }}
-                      onClick={e => { e.stopPropagation(); handleCreateBackupAccount(customer.id); }}
-                    >
-                      Speichern
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })()}
 
           {/* Devices Table */}
           {isCustomerExpanded && groupedDevices.length > 0 && (

@@ -45,14 +45,15 @@ export default function AdminLayout({ currentUser, onLogout }: Props) {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
-      {/* Sidebar */}
+      {/* Sidebar — sticky so Dashboard button is always visible */}
       <aside style={{
         width: '220px', backgroundColor: '#0f172a', borderRight: '1px solid #1e293b',
         padding: '20px 0', flexShrink: 0, display: 'flex', flexDirection: 'column',
+        position: 'sticky', top: 0, height: '100vh', overflowY: 'auto',
       }}>
         <div style={{ padding: '0 20px', marginBottom: '32px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9', margin: 0 }}>Admin</h1>
-          <p style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>Version Checker</p>
+          <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9', margin: 0 }}>NetFactory</h1>
+          <p style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>Monitoring</p>
         </div>
 
         <nav style={{ flex: 1 }}>
@@ -75,14 +76,13 @@ export default function AdminLayout({ currentUser, onLogout }: Props) {
           ))}
         </nav>
 
-        <div style={{ padding: '0 20px', marginTop: 'auto', paddingBottom: '20px' }}>
+        <div style={{ padding: '12px 20px', borderTop: '1px solid #1e293b', flexShrink: 0 }}>
           <a
             href="#/"
             style={{
               display: 'block', padding: '8px 12px', borderRadius: '6px',
               backgroundColor: '#1e293b', color: '#94a3b8', textDecoration: 'none',
               fontSize: '13px', textAlign: 'center', border: '1px solid #334155',
-              marginBottom: '8px',
             }}
           >
             &larr; Dashboard

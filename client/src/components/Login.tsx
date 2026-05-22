@@ -59,11 +59,8 @@ export default function Login({ onLogin }: Props) {
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
           </svg>
           <h1 style={{ fontSize: '22px', fontWeight: 800, color: '#f1f5f9', margin: 0 }}>
-            Version Checker
-          </h1>
-          <p style={{ color: '#64748b', fontSize: '14px', marginTop: '6px' }}>
             NetFactory Monitoring
-          </p>
+          </h1>
         </div>
 
         <div style={{ marginBottom: '16px' }}>

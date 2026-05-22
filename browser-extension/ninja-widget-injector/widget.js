@@ -1,5 +1,6 @@
 const API_BASE_CANDIDATES = [
-  "http://localhost:3001/api",
+  "https://10.16.10.58/api",
+   "http://localhost:3001/api",
   "http://127.0.0.1:3001/api"
 ];
 
@@ -78,6 +79,7 @@ function calcStatus(devices) {
 function backupBadgeClass(status) {
   if (status === "success") return "badge-backup-ok";
   if (status === "failed" || status === "missed") return "badge-backup-warn";
+  if (status === "paused") return "badge-backup-unknown";
   if (status === "none") return null;
   return "badge-backup-unknown";
 }
@@ -86,6 +88,7 @@ function backupBadgeLabel(status) {
   if (status === "success") return "Backup OK";
   if (status === "failed")  return "Backup Fehler";
   if (status === "missed")  return "Backup ausgeblieben";
+  if (status === "paused")  return "Backup pausiert";
   if (status === "unknown") return "Backup unbekannt";
   return null;
 }
@@ -93,6 +96,7 @@ function backupBadgeLabel(status) {
 function backupStatusColor(status) {
   if (status === "success") return "#22c55e";
   if (status === "failed" || status === "missed") return "#ef4444";
+  if (status === "paused") return "#6366f1";
   return "#64748b";
 }
 
@@ -100,6 +104,7 @@ function backupStatusLabel(status) {
   if (status === "success") return "OK";
   if (status === "failed")  return "Fehler";
   if (status === "missed")  return "Ausgeblieben";
+  if (status === "paused")  return "Pausiert";
   return "Unbekannt";
 }
 
@@ -112,7 +117,7 @@ function backupFormatRelative(iso) {
   return `vor ${Math.floor(h / 24)} Tag(en)`;
 }
 
-function buildHistoryDots(recentResults) {
+function buildHistoryDots(recentResults, manualStatus) {
   const wrap = document.createElement("div");
   wrap.style.cssText = "display:flex;gap:3px;align-items:center;margin-top:4px;";
   if (!recentResults || recentResults.length === 0) {
@@ -124,10 +129,19 @@ function buildHistoryDots(recentResults) {
   }
   const dotColor = s => s === "success" ? "#22c55e" : "#ef4444";
   const dotTitle = s => s === "success" ? "OK" : s === "failed" ? "Fehler" : "Ausgeblieben";
-  [...recentResults].reverse().forEach(r => {
+  const reversed = [...recentResults].reverse();
+  reversed.forEach((r, i) => {
+    const isNewest = i === reversed.length - 1;
+    const showManual = isNewest && manualStatus === "success";
     const dot = document.createElement("div");
-    dot.title = `${new Date(r.slotEnd).toLocaleString("de-DE")} — ${dotTitle(r.status)}`;
-    dot.style.cssText = `width:9px;height:9px;border-radius:50%;background:${dotColor(r.status)};flex-shrink:0;opacity:${r.status === "missed" ? "0.45" : "1"};`;
+    if (showManual) {
+      dot.title = "Manuell als OK markiert";
+      dot.style.cssText = "width:9px;height:9px;border-radius:2px;background:#22c55e;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:6px;color:#fff;font-weight:900;line-height:1;";
+      dot.textContent = "✓";
+    } else {
+      dot.title = `${new Date(r.slotEnd).toLocaleString("de-DE")} — ${dotTitle(r.status)}`;
+      dot.style.cssText = `width:9px;height:9px;border-radius:50%;background:${dotColor(r.status)};flex-shrink:0;opacity:${r.status === "missed" ? "0.45" : "1"};`;
+    }
     wrap.appendChild(dot);
   });
   return wrap;
@@ -776,7 +790,7 @@ function renderCustomerDetail(detail) {
       lastMail.textContent = `Letzter Eingang: ${backupFormatRelative(check.lastReceivedAt)}`;
       card.appendChild(lastMail);
 
-      card.appendChild(buildHistoryDots(check.recentResults));
+      card.appendChild(buildHistoryDots(check.recentResults, check.manualStatus));
       backupGrid.appendChild(card);
     }
 
@@ -802,15 +816,17 @@ function renderBackup(data) {
   const totalChecks  = groups.reduce((s, g) => s + g.checks.length, 0);
   const failedCount  = groups.reduce((s, g) => s + g.checks.filter(c => c.currentStatus === "failed" || c.currentStatus === "missed").length, 0);
   const successCount = groups.reduce((s, g) => s + g.checks.filter(c => c.currentStatus === "success").length, 0);
+  const pausedCount  = groups.reduce((s, g) => s + g.checks.filter(c => c.currentStatus === "paused").length, 0);
 
   const summary = document.createElement("p");
   summary.style.cssText = "color:#64748b;font-size:12px;margin:0 0 14px;";
-  summary.textContent = `${totalChecks} Check(s) · ${successCount} OK · ${failedCount} Problem(e)`;
+  summary.textContent = `${totalChecks} Check(s) · ${successCount} OK · ${failedCount} Problem(e)${pausedCount > 0 ? ` · ${pausedCount} Pausiert` : ""}`;
   elements.content.appendChild(summary);
 
   for (const group of groups) {
-    const groupFailed = group.checks.filter(c => c.currentStatus === "failed" || c.currentStatus === "missed").length;
-    const groupOk     = group.checks.filter(c => c.currentStatus === "success").length;
+    const groupFailed  = group.checks.filter(c => c.currentStatus === "failed" || c.currentStatus === "missed").length;
+    const groupOk      = group.checks.filter(c => c.currentStatus === "success").length;
+    const groupPaused  = group.checks.filter(c => c.currentStatus === "paused").length;
 
     const card = document.createElement("div");
     card.className = "backup-group-card";
@@ -837,6 +853,12 @@ function renderBackup(data) {
       s.textContent = `${groupFailed} Problem(e)`;
       groupStats.appendChild(s);
     }
+    if (groupPaused > 0) {
+      const s = document.createElement("span");
+      s.style.cssText = "color:#818cf8;";
+      s.textContent = `${groupPaused} Pausiert`;
+      groupStats.appendChild(s);
+    }
     const tot = document.createElement("span");
     tot.style.color = "#475569";
     tot.textContent = `${group.checks.length} Checks`;
@@ -855,22 +877,34 @@ function renderBackup(data) {
       <span>Historie</span>
       <span style="text-align:right;">Letzte E-Mail</span>
       <span style="text-align:right;">Status</span>
+      <span></span>
     `;
     card.appendChild(colHdr);
 
     for (const check of group.checks) {
       const color = backupStatusColor(check.currentStatus);
+      const isPaused = !!check.paused;
+      const isManualOk = check.manualStatus === "success";
       const row = document.createElement("div");
       row.className = "backup-check-row";
+      if (isPaused) row.style.opacity = "0.85";
 
+      // Status dot — square if manually set, circle otherwise
       const dot = document.createElement("div");
-      dot.style.cssText = `width:9px;height:9px;border-radius:50%;background:${color};flex-shrink:0;`;
+      dot.style.cssText = `width:9px;height:9px;border-radius:${isManualOk ? "2px" : "50%"};background:${color};flex-shrink:0;`;
 
       const name = document.createElement("span");
       name.className = "backup-check-name";
       name.textContent = check.name;
+      if (isPaused && check.pausedReason) name.title = check.pausedReason;
+      if (isPaused) {
+        const badge = document.createElement("span");
+        badge.style.cssText = "margin-left:5px;font-size:9px;font-weight:700;color:#818cf8;background:#1e1b4b;border:1px solid #4338ca55;border-radius:3px;padding:0 4px;vertical-align:middle;";
+        badge.textContent = "PAUSIERT";
+        name.appendChild(badge);
+      }
 
-      const hist = buildHistoryDots(check.recentResults);
+      const hist = buildHistoryDots(check.recentResults, check.manualStatus);
 
       const lastMail = document.createElement("span");
       lastMail.style.cssText = "color:#64748b;font-size:11px;text-align:right;";
@@ -880,11 +914,51 @@ function renderBackup(data) {
       statusEl.style.cssText = `font-size:11px;font-weight:600;color:${color};text-align:right;`;
       statusEl.textContent = backupStatusLabel(check.currentStatus);
 
+      // Actions: ✓ manual-OK toggle + pause/resume
+      const actions = document.createElement("div");
+      actions.style.cssText = "display:flex;gap:5px;align-items:center;justify-content:flex-end;";
+
+      const okBtn = document.createElement("button");
+      okBtn.title = isManualOk ? "Manuelle OK-Markierung aufheben" : "Als OK markieren";
+      okBtn.style.cssText = `width:22px;height:22px;border-radius:4px;padding:0;border:2px solid ${isManualOk ? "#22c55e" : "#334155"};background:${isManualOk ? "#065f4620" : "transparent"};color:${isManualOk ? "#22c55e" : "#475569"};cursor:pointer;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;line-height:1;`;
+      okBtn.textContent = "✓";
+      okBtn.addEventListener("click", async () => {
+        try {
+          await callApi("POST", `/admin/backup-checks/${check.id}/manual-status`, { status: isManualOk ? null : "success" });
+          refresh();
+        } catch (e) { alert(e.message); }
+      });
+
+      const pauseBtn = document.createElement("button");
+      if (isPaused) {
+        pauseBtn.title = "Fortsetzen";
+        pauseBtn.style.cssText = "padding:2px 7px;border-radius:4px;border:1px solid #4338ca;background:#1e1b4b;color:#818cf8;font-size:10px;cursor:pointer;white-space:nowrap;";
+        pauseBtn.textContent = "▶";
+        pauseBtn.addEventListener("click", async () => {
+          try { await callApi("POST", `/admin/backup-checks/${check.id}/resume`, {}); refresh(); }
+          catch (e) { alert(e.message); }
+        });
+      } else {
+        pauseBtn.title = "Pausieren";
+        pauseBtn.style.cssText = "padding:2px 7px;border-radius:4px;border:1px solid #334155;background:transparent;color:#64748b;font-size:10px;cursor:pointer;white-space:nowrap;";
+        pauseBtn.textContent = "⏸";
+        pauseBtn.addEventListener("click", async () => {
+          const reason = prompt(`"${check.name}" pausieren. Grund (optional):`);
+          if (reason === null) return;
+          try { await callApi("POST", `/admin/backup-checks/${check.id}/pause`, { reason: reason || "Manuell pausiert" }); refresh(); }
+          catch (e) { alert(e.message); }
+        });
+      }
+
+      actions.appendChild(okBtn);
+      actions.appendChild(pauseBtn);
+
       row.appendChild(dot);
       row.appendChild(name);
       row.appendChild(hist);
       row.appendChild(lastMail);
       row.appendChild(statusEl);
+      row.appendChild(actions);
       card.appendChild(row);
     }
 
@@ -912,19 +986,24 @@ function renderBackupSubTabs() {
 
 // ── Render: Backup Management ─────────────────────────────────────────────────
 
-function renderBackupManagement(accounts, checks) {
+function renderBackupManagement(accounts, checks, customers) {
   elements.content.innerHTML = "";
   elements.content.appendChild(renderBackupSubTabs());
 
-  const accountMap = {};
-  accounts.forEach(a => { accountMap[a.id] = a; });
+  // Build lookup maps
+  const accountByCustomer = {};
+  accounts.forEach(a => { accountByCustomer[a.customerId] = a; });
 
-  // Group checks by account
-  const byAccount = {};
-  accounts.forEach(a => { byAccount[a.id] = []; });
-  checks.forEach(c => { if (byAccount[c.backupAccountId]) byAccount[c.backupAccountId].push(c); });
+  const checksByAccount = {};
+  accounts.forEach(a => { checksByAccount[a.id] = []; });
+  checks.forEach(c => { if (checksByAccount[c.backupAccountId]) checksByAccount[c.backupAccountId].push(c); });
 
-  let showForm = false;
+  // All customers sorted alphabetically
+  const sorted = [...customers].sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+  // Per-customer email input state (for customers without a backup account)
+  const emailInputs = {};
+
   let formAccountId = accounts.length ? String(accounts[0].id) : "";
   let formName = "";
   let formSubject = "";
@@ -936,7 +1015,7 @@ function renderBackupManagement(accounts, checks) {
   const wrap = document.createElement("div");
   elements.content.appendChild(wrap);
 
-  function renderForm() {
+  function renderCheckForm() {
     const overlay = document.createElement("div");
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;";
     const box = document.createElement("div");
@@ -963,7 +1042,6 @@ function renderBackupManagement(accounts, checks) {
       return g;
     };
 
-    // Account select
     const accGroup = document.createElement("div");
     accGroup.style.cssText = "margin-bottom:12px;";
     const accLabel = document.createElement("label");
@@ -974,7 +1052,7 @@ function renderBackupManagement(accounts, checks) {
     accounts.forEach(a => {
       const opt = document.createElement("option");
       opt.value = String(a.id);
-      opt.textContent = `${a.name} (${a.fromEmail})`;
+      opt.textContent = `${a.customerName} (${a.fromEmail})`;
       if (String(a.id) === formAccountId) opt.selected = true;
       accSel.appendChild(opt);
     });
@@ -986,7 +1064,6 @@ function renderBackupManagement(accounts, checks) {
     box.appendChild(inp("Name des Checks", formName, v => formName = v));
     box.appendChild(inp("Betreff-Filter (optional)", formSubject, v => formSubject = v));
 
-    // Match type
     const mtGroup = document.createElement("div");
     mtGroup.style.cssText = "margin-bottom:12px;";
     const mtLabel = document.createElement("label");
@@ -1005,7 +1082,6 @@ function renderBackupManagement(accounts, checks) {
     mtGroup.appendChild(mtSel);
     box.appendChild(mtGroup);
 
-    // Interval select
     const intGroup = document.createElement("div");
     intGroup.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;";
     const makeNumField = (label, val, setter) => {
@@ -1037,13 +1113,13 @@ function renderBackupManagement(accounts, checks) {
     const cancel = document.createElement("button");
     cancel.textContent = "Abbrechen";
     cancel.style.cssText = "padding:8px 16px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;cursor:pointer;font-size:14px;";
-    cancel.addEventListener("click", () => { overlay.remove(); showForm = false; });
+    cancel.addEventListener("click", () => { overlay.remove(); });
 
     const save = document.createElement("button");
     save.textContent = "Speichern";
     save.style.cssText = "padding:8px 16px;border-radius:6px;border:none;background:#3b82f6;color:#fff;cursor:pointer;font-size:14px;font-weight:600;";
     save.addEventListener("click", async () => {
-      if (!formName.trim()) { formError = "Name ist erforderlich"; overlay.remove(); renderForm(); return; }
+      if (!formName.trim()) { formError = "Name ist erforderlich"; overlay.remove(); renderCheckForm(); return; }
       save.textContent = "Speichern...";
       save.disabled = true;
       try {
@@ -1062,7 +1138,7 @@ function renderBackupManagement(accounts, checks) {
         save.textContent = "Speichern";
         save.disabled = false;
         overlay.remove();
-        renderForm();
+        renderCheckForm();
       }
     });
 
@@ -1074,64 +1150,122 @@ function renderBackupManagement(accounts, checks) {
     document.body.appendChild(overlay);
   }
 
-  // "Neuer Check" button
-  const addBtn = document.createElement("button");
-  addBtn.style.cssText = "padding:7px 14px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;font-weight:600;margin-bottom:16px;";
-  addBtn.textContent = "+ Neuer Check";
-  addBtn.addEventListener("click", () => {
-    formName = ""; formSubject = ""; formMatchType = "contains";
-    formInterval = "24"; formGrace = "1"; formError = "";
-    renderForm();
-  });
-  wrap.appendChild(addBtn);
+  // "Neuer Check" button — only shown when at least one account exists
+  if (accounts.length > 0) {
+    const addBtn = document.createElement("button");
+    addBtn.style.cssText = "padding:7px 14px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;font-weight:600;margin-bottom:16px;";
+    addBtn.textContent = "+ Neuer Check";
+    addBtn.addEventListener("click", () => {
+      formName = ""; formSubject = ""; formMatchType = "contains";
+      formInterval = "24"; formGrace = "1"; formError = "";
+      formAccountId = accounts.length ? String(accounts[0].id) : "";
+      renderCheckForm();
+    });
+    wrap.appendChild(addBtn);
+  }
 
-  if (accounts.length === 0) {
+  if (sorted.length === 0) {
     const empty = document.createElement("p");
     empty.style.cssText = "color:#64748b;font-size:13px;";
-    empty.textContent = "Keine Backup-Accounts konfiguriert.";
+    empty.textContent = "Keine Kunden vorhanden.";
     wrap.appendChild(empty);
     sendHeight();
     return;
   }
 
-  // Render per account
-  accounts.forEach(account => {
-    const accountChecks = byAccount[account.id] || [];
+  // Render one card per customer
+  sorted.forEach(customer => {
+    const account = accountByCustomer[customer.id] || null;
+    const accountChecks = account ? (checksByAccount[account.id] || []) : [];
 
     const card = document.createElement("div");
     card.style.cssText = "background:#0f172a;border:1px solid #1e293b;border-radius:8px;margin-bottom:12px;overflow:hidden;";
 
+    // Header
     const hdr = document.createElement("div");
-    hdr.style.cssText = "padding:10px 14px;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;";
+    hdr.style.cssText = "padding:10px 14px;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;";
+
     const hdrLeft = document.createElement("div");
+    hdrLeft.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;";
+
     const hdrName = document.createElement("span");
-    hdrName.style.cssText = "color:#f1f5f9;font-size:14px;font-weight:600;";
-    hdrName.textContent = account.name;
-    const hdrEmail = document.createElement("span");
-    hdrEmail.style.cssText = "color:#475569;font-size:11px;margin-left:8px;";
-    hdrEmail.textContent = account.fromEmail;
+    hdrName.style.cssText = "color:#f1f5f9;font-size:14px;font-weight:600;white-space:nowrap;";
+    hdrName.textContent = customer.name;
     hdrLeft.appendChild(hdrName);
-    hdrLeft.appendChild(hdrEmail);
-    const hdrCount = document.createElement("span");
-    hdrCount.style.cssText = "color:#64748b;font-size:12px;";
-    hdrCount.textContent = `${accountChecks.length} Check${accountChecks.length !== 1 ? "s" : ""}`;
+
+    if (account) {
+      // Show email + remove button
+      const hdrEmail = document.createElement("span");
+      hdrEmail.style.cssText = "color:#475569;font-size:11px;font-family:monospace;";
+      hdrEmail.textContent = account.fromEmail;
+      hdrLeft.appendChild(hdrEmail);
+
+      const removeBtn = document.createElement("button");
+      removeBtn.style.cssText = "padding:2px 8px;border-radius:4px;border:1px solid #7f1d1d;background:transparent;color:#ef4444;font-size:11px;cursor:pointer;white-space:nowrap;";
+      removeBtn.textContent = "✕ E-Mail entfernen";
+      removeBtn.addEventListener("click", async () => {
+        if (!confirm("Backup-Account löschen? Alle zugehörigen Checks werden ebenfalls gelöscht.")) return;
+        try { await callApi("DELETE", `/admin/customers/${customer.id}/backup`); refresh(); }
+        catch (e) { alert(e.message); }
+      });
+      hdrLeft.appendChild(removeBtn);
+    } else {
+      // Inline email input
+      const emailInput = document.createElement("input");
+      emailInput.type = "email";
+      emailInput.placeholder = "FROM-Adresse hinterlegen…";
+      emailInput.style.cssText = "padding:4px 8px;background:#1e293b;border:1px solid #334155;border-radius:5px;color:#f1f5f9;font-size:12px;width:220px;outline:none;";
+      emailInput.value = emailInputs[customer.id] || "";
+      emailInput.addEventListener("input", () => { emailInputs[customer.id] = emailInput.value; });
+
+      const saveEmailBtn = document.createElement("button");
+      saveEmailBtn.style.cssText = "padding:4px 10px;border-radius:5px;border:none;background:#3b82f6;color:#fff;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:600;";
+      saveEmailBtn.textContent = "Speichern";
+      saveEmailBtn.addEventListener("click", async () => {
+        const email = emailInput.value.trim();
+        if (!email) return;
+        try {
+          await callApi("POST", `/admin/customers/${customer.id}/backup`, { fromEmail: email, name: customer.name });
+          refresh();
+        } catch (e) { alert(e.message); }
+      });
+
+      emailInput.addEventListener("keydown", e => { if (e.key === "Enter") saveEmailBtn.click(); });
+
+      hdrLeft.appendChild(emailInput);
+      hdrLeft.appendChild(saveEmailBtn);
+    }
+
     hdr.appendChild(hdrLeft);
+
+    const hdrCount = document.createElement("span");
+    hdrCount.style.cssText = "color:#64748b;font-size:12px;white-space:nowrap;";
+    hdrCount.textContent = `${accountChecks.length} Checks`;
     hdr.appendChild(hdrCount);
+
     card.appendChild(hdr);
 
-    if (accountChecks.length === 0) {
+    // Body
+    if (!account) {
+      const hint = document.createElement("p");
+      hint.style.cssText = "color:#475569;font-size:12px;font-style:italic;padding:10px 14px;margin:0;";
+      hint.textContent = "Keine E-Mail hinterlegt — bitte oben eine FROM-Adresse eingeben.";
+      card.appendChild(hint);
+    } else if (accountChecks.length === 0) {
       const none = document.createElement("p");
       none.style.cssText = "color:#475569;font-size:12px;padding:10px 14px;margin:0;";
       none.textContent = "Keine Checks vorhanden.";
       card.appendChild(none);
     } else {
       accountChecks.forEach(check => {
+        const isPaused = !!check.paused;
         const row = document.createElement("div");
-        row.style.cssText = `display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:12px;padding:9px 14px;border-bottom:1px solid #0f172a;opacity:${check.active ? 1 : 0.5};`;
+        row.style.cssText = `display:grid;grid-template-columns:1fr auto auto auto auto;align-items:center;gap:12px;padding:9px 14px;border-bottom:1px solid #0f172a;opacity:${check.active ? 1 : 0.5};`;
 
         const nameEl = document.createElement("span");
-        nameEl.style.cssText = "color:#e2e8f0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-        nameEl.textContent = check.name;
+        nameEl.style.cssText = `color:${isPaused ? "#818cf8" : "#e2e8f0"};font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+        nameEl.textContent = isPaused ? `⏸ ${check.name}` : check.name;
+        nameEl.title = isPaused && check.pausedReason ? check.pausedReason : check.name;
 
         const interval = document.createElement("span");
         interval.style.cssText = "color:#64748b;font-size:11px;white-space:nowrap;";
@@ -1145,8 +1279,27 @@ function renderBackupManagement(accounts, checks) {
           catch (e) { alert(e.message); }
         });
 
+        const pauseBtn = document.createElement("button");
+        if (isPaused) {
+          pauseBtn.style.cssText = "padding:3px 8px;border-radius:4px;border:1px solid #4338ca;background:#1e1b4b;color:#818cf8;font-size:11px;cursor:pointer;white-space:nowrap;";
+          pauseBtn.textContent = "▶ Fortsetzen";
+          pauseBtn.addEventListener("click", async () => {
+            try { await callApi("POST", `/admin/backup-checks/${check.id}/resume`, {}); refresh(); }
+            catch (e) { alert(e.message); }
+          });
+        } else {
+          pauseBtn.style.cssText = "padding:3px 8px;border-radius:4px;border:1px solid #334155;background:transparent;color:#64748b;font-size:11px;cursor:pointer;white-space:nowrap;";
+          pauseBtn.textContent = "⏸ Pause";
+          pauseBtn.addEventListener("click", async () => {
+            const reason = prompt(`Check "${check.name}" pausieren. Grund (optional):`);
+            if (reason === null) return;
+            try { await callApi("POST", `/admin/backup-checks/${check.id}/pause`, { reason: reason || "Manuell pausiert" }); refresh(); }
+            catch (e) { alert(e.message); }
+          });
+        }
+
         const delBtn = document.createElement("button");
-        delBtn.style.cssText = "padding:3px 8px;border-radius:4px;border:1px solid #7f1d1d;background:transparent;color:#ef4444;font-size:11px;cursor:pointer;";
+        delBtn.style.cssText = "padding:3px 8px;border-radius:4px;border:1px solid #7f1d1d;background:transparent;color:#ef4444;font-size:11px;cursor:pointer;white-space:nowrap;";
         delBtn.textContent = "Löschen";
         delBtn.addEventListener("click", async () => {
           if (!confirm(`Check "${check.name}" löschen?`)) return;
@@ -1157,6 +1310,7 @@ function renderBackupManagement(accounts, checks) {
         row.appendChild(nameEl);
         row.appendChild(interval);
         row.appendChild(activeToggle);
+        row.appendChild(pauseBtn);
         row.appendChild(delBtn);
         card.appendChild(row);
       });
@@ -1369,8 +1523,8 @@ async function refresh() {
     clearError();
     if (groupBy === "backup") {
       if (backupSubView === "manage") {
-        const [accounts, checks] = await Promise.all([fetchBackupAccounts(), fetchBackupChecks()]);
-        renderBackupManagement(accounts, checks);
+        const [accounts, checks, customers] = await Promise.all([fetchBackupAccounts(), fetchBackupChecks(), fetchCustomers()]);
+        renderBackupManagement(accounts, checks, customers);
       } else {
         const data = await fetchBackupStatus();
         renderBackup(data);

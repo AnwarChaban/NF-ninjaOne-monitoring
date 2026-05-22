@@ -6,7 +6,7 @@ import {
   deleteSophosAccount,
   assignSophosTenant,
   triggerSophosSync,
-  type MockCustomer,
+  type Customer,
   type SophosTenantEntry,
   type SophosUnmatchedTenant,
 } from '../../api';
@@ -25,7 +25,7 @@ const ghostBtn: React.CSSProperties = { ...btnStyle, backgroundColor: 'transpare
 
 export default function SophosPage() {
   const [tenants, setTenants] = useState<SophosTenantEntry[]>([]);
-  const [customers, setCustomers] = useState<MockCustomer[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [unmatched, setUnmatched] = useState<SophosUnmatchedTenant[]>([]);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [isSyncing, setIsSyncing] = useState(false);
@@ -40,7 +40,7 @@ export default function SophosPage() {
   async function load() {
     const [t, c, u] = await Promise.all([
       fetchSophosTenants().catch(() => [] as SophosTenantEntry[]),
-      fetchCustomers().catch(() => [] as MockCustomer[]),
+      fetchCustomers().catch(() => [] as Customer[]),
       fetchSophosUnmatchedTenants().catch(() => [] as SophosUnmatchedTenant[]),
     ]);
     setTenants(t);

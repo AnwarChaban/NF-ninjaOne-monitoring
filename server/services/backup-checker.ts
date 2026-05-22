@@ -2,8 +2,10 @@ import { getDb } from '../db';
 import { fetchEmailsFromSender } from './graph-mail';
 import { isGraphConfigured } from './runtime-settings';
 import { startSync, completeSync, failSync } from './sync-history';
+import { logAction } from './audit';
+import type { AuthUser } from './auth';
 
-export type BackupStatus = 'success' | 'failed' | 'missed' | 'unknown';
+export type BackupStatus = 'success' | 'failed' | 'missed' | 'unknown' | 'paused';
 
 export interface BackupAccount {
   id: number;
@@ -27,6 +29,15 @@ export interface BackupCheck {
   bodyFilter: string | null;
   active: boolean;
   createdAt: string;
+  paused: boolean;
+  pausedAt: string | null;
+  pausedBy: number | null;
+  pausedReason: string | null;
+  pausedUntil: string | null;
+  manualStatus: 'success' | 'failed' | 'missed' | 'unknown' | null;
+  manualStatusSetAt: string | null;
+  manualStatusSetBy: number | null;
+  manualStatusComment: string | null;
 }
 
 export interface BackupCheckResult {
@@ -74,15 +85,120 @@ function matchesCheck(subject: string, bodyPreview: string, check: BackupCheck):
   return true;
 }
 
-function computeStatus(check: BackupCheck, lastResult: BackupCheckResult | null): BackupStatus {
+function computeCheckStatus(check: BackupCheck, lastResult: BackupCheckResult | null): BackupStatus {
+  if (check.paused) return 'paused';
+  if (check.manualStatus !== null) return check.manualStatus;
   if (!lastResult) return 'unknown';
   const ageHours = (Date.now() - new Date(lastResult.receivedAt).getTime()) / 3_600_000;
   if (ageHours > check.intervalHours + check.graceHours) return 'missed';
   return lastResult.status;
 }
 
+function getCheckInfo(checkId: number): { name: string; customerName: string } | undefined {
+  return getDb().prepare(`
+    SELECT bc.name, c.name as customerName
+    FROM backup_checks bc
+    JOIN backup_accounts ba ON bc.backup_account_id = ba.id
+    JOIN customers c ON ba.customer_id = c.id
+    WHERE bc.id = ?
+  `).get(checkId) as { name: string; customerName: string } | undefined;
+}
+
+export function setManualStatus(
+  checkId: number,
+  status: 'success' | 'failed' | 'missed' | 'unknown' | null,
+  user: AuthUser | null,
+  comment: string | null = null,
+): void {
+  const db = getDb();
+  const row = getCheckInfo(checkId);
+  if (!row) throw new Error('Backup check not found');
+
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE backup_checks
+    SET manual_status = ?, manual_status_set_at = ?, manual_status_set_by = ?,
+        manual_status_comment = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    status ?? null,
+    status ? now : null,
+    status ? (user?.id ?? null) : null,
+    comment ?? null,
+    now,
+    checkId,
+  );
+
+  if (status !== null) {
+    logAction(user, 'backup_check_status_manual_set', 'backup_check', checkId, row.name,
+      { checkName: row.name, customerName: row.customerName, status, comment }, null);
+  } else {
+    logAction(user, 'backup_check_status_manual_cleared', 'backup_check', checkId, row.name,
+      { checkName: row.name, customerName: row.customerName }, null);
+  }
+}
+
+export function pauseCheck(
+  checkId: number,
+  user: AuthUser | null,
+  reason: string,
+  pausedUntil: string | null = null,
+): void {
+  const db = getDb();
+  const row = getCheckInfo(checkId);
+  if (!row) throw new Error('Backup check not found');
+
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE backup_checks
+    SET paused = 1, paused_at = ?, paused_by = ?, paused_reason = ?, paused_until = ?, updated_at = ?
+    WHERE id = ?
+  `).run(now, user?.id ?? null, reason, pausedUntil ?? null, now, checkId);
+
+  logAction(user, 'backup_check_paused', 'backup_check', checkId, row.name,
+    { checkName: row.name, customerName: row.customerName, reason, pausedUntil }, null);
+}
+
+export function resumeCheck(checkId: number, user: AuthUser | null): void {
+  const db = getDb();
+  const row = getCheckInfo(checkId);
+  if (!row) throw new Error('Backup check not found');
+
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE backup_checks
+    SET paused = 0, paused_at = NULL, paused_by = NULL, paused_reason = NULL, paused_until = NULL, updated_at = ?
+    WHERE id = ?
+  `).run(now, checkId);
+
+  logAction(user, 'backup_check_resumed', 'backup_check', checkId, row.name,
+    { checkName: row.name, customerName: row.customerName }, null);
+}
+
+export function checkPausedExpiry(): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const expired = db.prepare(`
+    SELECT id FROM backup_checks WHERE paused = 1 AND paused_until IS NOT NULL AND paused_until <= ?
+  `).all(now) as Array<{ id: number }>;
+
+  for (const { id } of expired) {
+    try {
+      resumeCheck(id, null);
+    } catch (e) {
+      console.error(`[BackupChecker] Auto-resume failed for check ${id}:`, e);
+    }
+  }
+
+  if (expired.length > 0) {
+    console.log(`[BackupChecker] Auto-resumed ${expired.length} paused check(s)`);
+  }
+}
+
 export async function syncBackupEmails(triggeredBy = 'cron'): Promise<{ checked: number; newResults: number }> {
   if (!isGraphConfigured()) throw new Error('Microsoft Graph API is not configured');
+
+  checkPausedExpiry();
 
   const syncId = startSync('backup', triggeredBy, 'backup_emails');
   try {
@@ -102,7 +218,7 @@ async function _syncBackupEmailsInternal(): Promise<{ checked: number; newResult
   const accounts = getAllBackupAccounts();
   if (accounts.length === 0) return { checked: 0, newResults: 0 };
 
-  const allChecks = getAllBackupChecks().filter(c => c.active);
+  const allChecks = getAllBackupChecks().filter(c => c.active && !c.paused);
 
   const insertResult = db.prepare(`
     INSERT OR IGNORE INTO backup_check_results
@@ -162,7 +278,12 @@ export function getAllBackupChecks(): BackupCheck[] {
            ba.from_email as fromEmail,
            bc.name, bc.interval_hours as intervalHours, bc.grace_hours as graceHours,
            bc.subject_filter as subjectFilter, bc.subject_match_type as subjectMatchType,
-           bc.body_filter as bodyFilter, bc.active, bc.created_at as createdAt
+           bc.body_filter as bodyFilter, bc.active, bc.created_at as createdAt,
+           bc.paused, bc.paused_at as pausedAt, bc.paused_by as pausedBy,
+           bc.paused_reason as pausedReason, bc.paused_until as pausedUntil,
+           bc.manual_status as manualStatus, bc.manual_status_set_at as manualStatusSetAt,
+           bc.manual_status_set_by as manualStatusSetBy,
+           bc.manual_status_comment as manualStatusComment
     FROM backup_checks bc
     JOIN backup_accounts ba ON bc.backup_account_id = ba.id
     JOIN customers c ON ba.customer_id = c.id
@@ -198,7 +319,7 @@ export function getBackupDashboardData(): BackupCustomerGroup[] {
 
     return {
       ...check,
-      currentStatus: computeStatus(check, lastResult ?? null),
+      currentStatus: computeCheckStatus(check, lastResult ?? null),
       lastReceivedAt: lastResult?.receivedAt ?? null,
       lastEmailStatus: lastResult?.status ?? null,
       recentResults,

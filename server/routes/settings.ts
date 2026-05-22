@@ -56,7 +56,6 @@ router.get('/settings', requireAuth, requireRole('administrator'), (_req, res) =
       settings[row.key] = row.value;
     }
   }
-  settings.mockMode = isNinjaOneConfigured() ? 'false' : 'true';
   settings.sophosConfigured = isSophosConfigured() ? 'true' : 'false';
   res.json(settings);
 });

@@ -6,6 +6,9 @@ import {
   getBackupDashboardData,
   getAllBackupChecks,
   getAllBackupAccounts,
+  setManualStatus,
+  pauseCheck,
+  resumeCheck,
 } from '../services/backup-checker';
 import { fetchEmailsFromSender } from '../services/graph-mail';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -217,6 +220,45 @@ router.put('/admin/backup-checks/:id', requireAuth, (req, res) => {
   db.prepare(`UPDATE backup_checks SET ${updates.join(', ')} WHERE id = ?`).run(...values);
   logAction(req.user!, 'backup_check.update', 'backup_check', id, name ?? String(id), null, req);
   res.json({ ok: true });
+});
+
+router.post('/admin/backup-checks/:id/manual-status', requireAuth, (req, res) => {
+  const id = parseInt(req.params.id);
+  const { status, comment } = req.body as {
+    status?: 'success' | 'failed' | 'missed' | 'unknown' | null;
+    comment?: string | null;
+  };
+  try {
+    setManualStatus(id, status ?? null, req.user!, comment ?? null);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message });
+  }
+});
+
+router.post('/admin/backup-checks/:id/pause', requireAuth, (req, res) => {
+  const id = parseInt(req.params.id);
+  const { reason, pausedUntil } = req.body as { reason?: string; pausedUntil?: string | null };
+  if (!reason) {
+    res.status(400).json({ error: 'reason is required' });
+    return;
+  }
+  try {
+    pauseCheck(id, req.user!, reason, pausedUntil ?? null);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message });
+  }
+});
+
+router.post('/admin/backup-checks/:id/resume', requireAuth, (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    resumeCheck(id, req.user!);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message });
+  }
 });
 
 router.delete('/admin/backup-checks/:id', requireAuth, (req, res) => {

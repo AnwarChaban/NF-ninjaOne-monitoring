@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
-  fetchBackupChecks, createBackupCheck, updateBackupCheck, deleteBackupCheck,
-  fetchBackupAccounts, triggerBackupSync,
-  type BackupCheckDef, type BackupAccount,
+  fetchCustomers, fetchBackupChecks, createBackupCheck, updateBackupCheck, deleteBackupCheck,
+  fetchBackupAccounts, createBackupAccount, deleteBackupAccount, triggerBackupSync,
+  pauseBackupCheck, resumeBackupCheck,
+  type Customer, type BackupCheckDef, type BackupAccount,
 } from '../../api';
 
 const BASE = '/api';
@@ -461,6 +462,8 @@ type ActivePanel = 'none' | 'single' | 'import';
 export default function BackupChecksPage() {
   const [checks, setChecks] = useState<BackupCheckDef[]>([]);
   const [accounts, setAccounts] = useState<BackupAccount[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [emailForms, setEmailForms] = useState<Record<number, string>>({});
   const [activePanel, setActivePanel] = useState<ActivePanel>('none');
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -469,9 +472,24 @@ export default function BackupChecksPage() {
   const [syncMsg, setSyncMsg] = useState('');
 
   async function load() {
-    const [c, a] = await Promise.all([fetchBackupChecks(), fetchBackupAccounts()]);
+    const [c, a, cust] = await Promise.all([fetchBackupChecks(), fetchBackupAccounts(), fetchCustomers()]);
     setChecks(c);
     setAccounts(a);
+    setCustomers(cust);
+  }
+
+  async function handleCreateBackupAccount(customerId: number, customerName: string) {
+    const email = emailForms[customerId]?.trim();
+    if (!email) return;
+    await createBackupAccount(customerId, { fromEmail: email, name: customerName });
+    setEmailForms(prev => { const next = { ...prev }; delete next[customerId]; return next; });
+    load();
+  }
+
+  async function handleDeleteBackupAccount(customerId: number) {
+    if (!confirm('Backup-Account löschen? Alle zugehörigen Checks werden ebenfalls gelöscht.')) return;
+    await deleteBackupAccount(customerId);
+    load();
   }
 
   useEffect(() => { load(); }, []);
@@ -530,6 +548,27 @@ export default function BackupChecksPage() {
     }
   }
 
+  async function handlePause(check: BackupCheckDef) {
+    const reason = window.prompt(`Check "${check.name}" pausieren. Grund (optional):`) ?? null;
+    if (reason === null) return; // cancelled
+    try {
+      await pauseBackupCheck(check.id, reason || 'Manuell pausiert');
+      load();
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }
+
+  async function handleResume(check: BackupCheckDef) {
+    try {
+      await resumeBackupCheck(check.id);
+      load();
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }
+
+
   function startEdit(check: BackupCheckDef) {
     setEditingId(check.id);
     setEditForm({
@@ -543,13 +582,14 @@ export default function BackupChecksPage() {
     });
   }
 
-  const grouped = new Map<number, { customerName: string; fromEmail: string; checks: BackupCheckDef[] }>();
-  for (const check of checks) {
-    if (!grouped.has(check.customerId)) {
-      grouped.set(check.customerId, { customerName: check.customerName, fromEmail: check.fromEmail, checks: [] });
-    }
-    grouped.get(check.customerId)!.checks.push(check);
-  }
+  const allGroups = customers
+    .map(c => ({
+      customerId: c.id,
+      customerName: c.name,
+      backupAccount: accounts.find(a => a.customerId === c.id) ?? null,
+      checks: checks.filter(ch => ch.customerId === c.id),
+    }))
+    .sort((a, b) => a.customerName.localeCompare(b.customerName));
 
   return (
     <div>
@@ -557,11 +597,6 @@ export default function BackupChecksPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '12px', flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ color: '#f1f5f9', fontSize: '22px', fontWeight: 700, margin: 0 }}>Backup-Checks</h2>
-          {accounts.length === 0 && (
-            <p style={{ color: '#f59e0b', fontSize: '13px', marginTop: '4px' }}>
-              Kein Backup-Account konfiguriert — bitte zuerst unter Kunden eine FROM-Adresse hinterlegen.
-            </p>
-          )}
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button style={ghostBtn} onClick={handleSync} disabled={syncing}>
@@ -607,80 +642,133 @@ export default function BackupChecksPage() {
         </div>
       )}
 
-      {/* Check list */}
-      {checks.length === 0 ? (
+      {/* Customer list */}
+      {customers.length === 0 ? (
         <div style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '40px', textAlign: 'center', color: '#64748b' }}>
-          Noch keine Backup-Checks konfiguriert.
+          Noch keine Kunden vorhanden.
         </div>
       ) : (
-        Array.from(grouped.entries()).map(([customerId, group]) => (
-          <div key={customerId} style={{ backgroundColor: '#1e293b', borderRadius: '10px', marginBottom: '16px', overflow: 'hidden' }}>
-            <div style={{ padding: '12px 16px', backgroundColor: '#111827', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
+        allGroups.map(group => (
+          <div key={group.customerId} style={{ backgroundColor: '#1e293b', borderRadius: '10px', marginBottom: '16px', overflow: 'hidden' }}>
+            {/* Customer header */}
+            <div style={{ padding: '12px 16px', backgroundColor: '#111827', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '15px' }}>{group.customerName}</span>
-                <span style={{ color: '#475569', fontSize: '12px', marginLeft: '10px', fontFamily: 'monospace' }}>FROM: {group.fromEmail}</span>
+                {group.backupAccount ? (
+                  <>
+                    <span style={{ color: '#475569', fontSize: '12px', fontFamily: 'monospace' }}>{group.backupAccount.fromEmail}</span>
+                    <button
+                      style={{ ...dangerBtn, padding: '2px 8px', fontSize: '11px' }}
+                      onClick={() => handleDeleteBackupAccount(group.customerId)}
+                    >✕ E-Mail entfernen</button>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      style={{ ...inputStyle, width: '240px', fontSize: '12px', padding: '4px 8px' }}
+                      placeholder="FROM-Adresse hinterlegen…"
+                      value={emailForms[group.customerId] ?? ''}
+                      onChange={e => setEmailForms(prev => ({ ...prev, [group.customerId]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleCreateBackupAccount(group.customerId, group.customerName)}
+                    />
+                    <button
+                      style={{ ...primaryBtn, padding: '4px 10px', fontSize: '12px' }}
+                      onClick={() => handleCreateBackupAccount(group.customerId, group.customerName)}
+                    >Speichern</button>
+                  </div>
+                )}
               </div>
-              <span style={{ color: '#64748b', fontSize: '12px' }}>{group.checks.length} Check(s)</span>
+              <span style={{ color: '#64748b', fontSize: '12px' }}>{group.checks.length} Checks</span>
             </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #334155' }}>
-                  {['Job-Name', 'Subject-Filter', 'Intervall', 'Toleranz', 'Aktiv', 'Aktionen'].map(h => (
-                    <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#64748b', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {group.checks.map(check => (
-                  <React.Fragment key={check.id}>
-                    {editingId === check.id ? (
-                      <tr style={{ borderBottom: '1px solid #0f172a' }}>
-                        <td colSpan={6} style={{ padding: '16px 12px' }}>
-                          <CheckForm form={editForm} accounts={accounts} onChange={setEditForm}
-                            onSave={() => handleUpdate(check.id)} onCancel={() => setEditingId(null)} saveLabel="Speichern" isEdit />
-                        </td>
-                      </tr>
-                    ) : (
-                      <tr style={{ borderBottom: '1px solid #0f172a' }}>
-                        <td style={{ padding: '10px 12px', color: '#e2e8f0', fontSize: '14px', fontWeight: 500 }}>{check.name}</td>
-                        <td style={{ padding: '10px 12px', maxWidth: '220px' }}>
-                          {check.subjectFilter ? (
-                            <>
-                              <span style={{ color: '#475569', fontSize: '11px', marginRight: '4px' }}>{check.subjectMatchType === 'exact' ? '=' : '~'}</span>
-                              <span style={{ color: '#94a3b8', fontSize: '13px', fontFamily: 'monospace' }}>{check.subjectFilter}</span>
-                            </>
-                          ) : (
-                            <span style={{ color: '#475569', fontSize: '12px', fontStyle: 'italic' }}>alle Mails</span>
-                          )}
-                          {check.bodyFilter && (
-                            <div style={{ color: '#475569', fontSize: '11px', fontFamily: 'monospace', marginTop: '2px' }}>body: {check.bodyFilter}</div>
-                          )}
-                        </td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: '13px' }}>{check.intervalHours} Std.</td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: '13px' }}>{check.graceHours} Std.</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <div onClick={() => handleToggle(check)} style={{
-                            width: '40px', height: '22px', borderRadius: '11px', cursor: 'pointer',
-                            backgroundColor: check.active ? '#065f46' : '#374151', position: 'relative',
-                          }}>
-                            <div style={{
-                              width: '16px', height: '16px', borderRadius: '50%', backgroundColor: '#fff',
-                              position: 'absolute', top: '3px', left: check.active ? '21px' : '3px', transition: 'left 0.2s',
-                            }} />
-                          </div>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button style={ghostBtn} onClick={() => startEdit(check)}>Bearbeiten</button>
-                            <button style={dangerBtn} onClick={() => handleDelete(check.id)}>Löschen</button>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+
+            {/* Checks table (only if backup account is set) */}
+            {group.backupAccount ? (
+              group.checks.length === 0 ? (
+                <p style={{ color: '#475569', fontSize: '13px', fontStyle: 'italic', padding: '12px 16px', margin: 0 }}>Keine Checks vorhanden.</p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #334155' }}>
+                      {['Job-Name', 'Subject-Filter', 'Intervall', 'Toleranz', 'Aktiv', 'Aktionen'].map(h => (
+                        <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#64748b', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.checks.map(check => (
+                      <React.Fragment key={check.id}>
+                        {editingId === check.id ? (
+                          <tr style={{ borderBottom: '1px solid #0f172a' }}>
+                            <td colSpan={6} style={{ padding: '16px 12px' }}>
+                              <CheckForm form={editForm} accounts={accounts} onChange={setEditForm}
+                                onSave={() => handleUpdate(check.id)} onCancel={() => setEditingId(null)} saveLabel="Speichern" isEdit />
+                            </td>
+                          </tr>
+                        ) : (
+                          <tr style={{ borderBottom: '1px solid #0f172a', opacity: check.paused ? 0.85 : 1 }}>
+                            <td style={{ padding: '10px 12px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ color: '#e2e8f0', fontSize: '14px', fontWeight: 500 }}>{check.name}</span>
+                                {check.paused && (
+                                  <span style={{
+                                    fontSize: '10px', fontWeight: 700, color: '#818cf8',
+                                    backgroundColor: '#1e1b4b', border: '1px solid #4338ca55',
+                                    borderRadius: '3px', padding: '1px 5px',
+                                  }}
+                                    title={check.pausedReason ?? undefined}
+                                  >
+                                    PAUSIERT
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 12px', maxWidth: '220px' }}>
+                              {check.subjectFilter ? (
+                                <>
+                                  <span style={{ color: '#475569', fontSize: '11px', marginRight: '4px' }}>{check.subjectMatchType === 'exact' ? '=' : '~'}</span>
+                                  <span style={{ color: '#94a3b8', fontSize: '13px', fontFamily: 'monospace' }}>{check.subjectFilter}</span>
+                                </>
+                              ) : (
+                                <span style={{ color: '#475569', fontSize: '12px', fontStyle: 'italic' }}>alle Mails</span>
+                              )}
+                              {check.bodyFilter && (
+                                <div style={{ color: '#475569', fontSize: '11px', fontFamily: 'monospace', marginTop: '2px' }}>body: {check.bodyFilter}</div>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: '13px' }}>{check.intervalHours} Std.</td>
+                            <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: '13px' }}>{check.graceHours} Std.</td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <div onClick={() => handleToggle(check)} style={{
+                                width: '40px', height: '22px', borderRadius: '11px', cursor: 'pointer',
+                                backgroundColor: check.active ? '#065f46' : '#374151', position: 'relative',
+                              }}>
+                                <div style={{
+                                  width: '16px', height: '16px', borderRadius: '50%', backgroundColor: '#fff',
+                                  position: 'absolute', top: '3px', left: check.active ? '21px' : '3px', transition: 'left 0.2s',
+                                }} />
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                <button style={ghostBtn} onClick={() => startEdit(check)}>Bearbeiten</button>
+                                {check.paused ? (
+                                  <button style={{ ...ghostBtn, color: '#818cf8', borderColor: '#4338ca55' }} onClick={() => handleResume(check)}>▶ Fortsetzen</button>
+                                ) : (
+                                  <button style={{ ...ghostBtn, color: '#64748b' }} onClick={() => handlePause(check)}>⏸ Pause</button>
+                                )}
+                                <button style={dangerBtn} onClick={() => handleDelete(check.id)}>Löschen</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )
+            ) : (
+              <p style={{ color: '#475569', fontSize: '13px', fontStyle: 'italic', padding: '12px 16px', margin: 0 }}>Keine E-Mail hinterlegt — bitte oben eine FROM-Adresse eingeben.</p>
+            )}
           </div>
         ))
       )}

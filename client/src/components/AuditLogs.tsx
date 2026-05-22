@@ -39,6 +39,10 @@ const ACTION_LABELS: Record<string, string> = {
   'backup_check.create': 'Backup-Check erstellt',
   'backup_check.update': 'Backup-Check bearbeitet',
   'backup_check.delete': 'Backup-Check gelöscht',
+  'backup_check_status_manual_set': 'Backup Check Status manuell gesetzt',
+  'backup_check_status_manual_cleared': 'Manueller Status zurückgesetzt',
+  'backup_check_paused': 'Backup Check pausiert',
+  'backup_check_resumed': 'Backup Check fortgesetzt',
   'settings.update': 'Einstellungen geändert',
   'sync.manual': 'Sync manuell',
 };
@@ -50,6 +54,10 @@ function actionLabel(action: string): string {
 function actionColor(action: string): string {
   if (action.includes('delete')) return '#ef4444';
   if (action.includes('create')) return '#4ade80';
+  if (action === 'backup_check_paused') return '#6366f1';
+  if (action === 'backup_check_resumed') return '#22c55e';
+  if (action === 'backup_check_status_manual_set') return '#f59e0b';
+  if (action === 'backup_check_status_manual_cleared') return '#94a3b8';
   if (action.includes('update') || action.includes('settings')) return '#fbbf24';
   if (action.includes('sync')) return '#60a5fa';
   return '#94a3b8';
