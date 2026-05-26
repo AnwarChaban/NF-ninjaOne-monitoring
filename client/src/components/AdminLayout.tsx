@@ -1,33 +1,63 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import CustomersPage from './admin/CustomersPage';
 import ProductsPage from './admin/ProductsPage';
 import SettingsPage from './admin/SettingsPage';
+import SophosPage from './admin/SophosPage';
+import UnifiPage from './admin/UnifiPage';
+import UserManagement from './UserManagement';
+import AuditLogs from './AuditLogs';
+import SyncOverview from './SyncOverview';
+import { logout, type AuthUser } from '../api';
 
-type AdminTab = 'customers' | 'products' | 'settings';
+type AdminTab = 'customers' | 'products' | 'unifi' | 'sophos' | 'settings' | 'users' | 'sync' | 'logs';
 
-const tabs: { key: AdminTab; label: string }[] = [
-  { key: 'customers', label: 'Kunden' },
-  { key: 'products', label: 'Produkte' },
-  { key: 'settings', label: 'Einstellungen' },
+interface TabDef {
+  key: AdminTab;
+  label: string;
+  adminOnly?: boolean;
+}
+
+const ALL_TABS: TabDef[] = [
+  { key: 'customers', label: 'Kunden', adminOnly: true },
+  { key: 'products', label: 'Produkte', adminOnly: true },
+  { key: 'unifi', label: 'UniFi', adminOnly: true },
+  { key: 'sophos', label: 'Sophos', adminOnly: true },
+  { key: 'sync', label: 'Sync-Übersicht', adminOnly: true },
+  { key: 'settings', label: 'Einstellungen', adminOnly: true },
+  { key: 'users', label: 'Benutzer', adminOnly: true },
+  { key: 'logs', label: 'Audit-Protokoll', adminOnly: true },
 ];
 
-export default function AdminLayout() {
+interface Props {
+  currentUser: AuthUser;
+  onLogout: () => void;
+}
+
+export default function AdminLayout({ currentUser, onLogout }: Props) {
+  const isAdmin = currentUser.role === 'administrator';
+  const visibleTabs = ALL_TABS.filter(t => !t.adminOnly || isAdmin);
   const [activeTab, setActiveTab] = useState<AdminTab>('customers');
+
+  async function handleLogout() {
+    try { await logout(); } catch { /* ignore */ }
+    onLogout();
+  }
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
-      {/* Sidebar */}
+      {/* Sidebar — sticky so Dashboard button is always visible */}
       <aside style={{
         width: '220px', backgroundColor: '#0f172a', borderRight: '1px solid #1e293b',
-        padding: '20px 0', flexShrink: 0,
+        padding: '20px 0', flexShrink: 0, display: 'flex', flexDirection: 'column',
+        position: 'sticky', top: 0, height: '100vh', overflowY: 'auto',
       }}>
         <div style={{ padding: '0 20px', marginBottom: '32px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9', margin: 0 }}>Admin</h1>
-          <p style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>Version Checker</p>
+          <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9', margin: 0 }}>NetFactory</h1>
+          <p style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>Monitoring</p>
         </div>
 
-        <nav>
-          {tabs.map(tab => (
+        <nav style={{ flex: 1 }}>
+          {visibleTabs.map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -46,7 +76,7 @@ export default function AdminLayout() {
           ))}
         </nav>
 
-        <div style={{ padding: '0 20px', marginTop: '32px' }}>
+        <div style={{ padding: '12px 20px', borderTop: '1px solid #1e293b', flexShrink: 0 }}>
           <a
             href="#/"
             style={{
@@ -61,11 +91,51 @@ export default function AdminLayout() {
       </aside>
 
       {/* Main Content */}
-      <main style={{ flex: 1, padding: '32px 40px', overflow: 'auto' }}>
-        {activeTab === 'customers' && <CustomersPage />}
-        {activeTab === 'products' && <ProductsPage />}
-        {activeTab === 'settings' && <SettingsPage />}
-      </main>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Header */}
+        <header style={{
+          padding: '12px 40px', borderBottom: '1px solid #1e293b',
+          backgroundColor: '#0f172a', display: 'flex',
+          justifyContent: 'flex-end', alignItems: 'center', flexShrink: 0,
+        }}>
+          <span style={{ color: '#94a3b8', fontSize: '13px', marginRight: '16px' }}>
+            Angemeldet als:{' '}
+            <span style={{ color: '#f1f5f9', fontWeight: 600 }}>
+              {currentUser.displayName}
+            </span>
+            {' '}
+            <span style={{
+              display: 'inline-block', padding: '1px 6px', borderRadius: '4px', fontSize: '11px',
+              backgroundColor: isAdmin ? '#1e3a5f' : '#1e3a2f',
+              color: isAdmin ? '#60a5fa' : '#4ade80',
+              marginLeft: '4px',
+            }}>
+              {isAdmin ? 'Administrator' : 'Techniker'}
+            </span>
+          </span>
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: '6px 14px', borderRadius: '6px', border: '1px solid #334155',
+              backgroundColor: 'transparent', color: '#94a3b8', fontSize: '13px',
+              cursor: 'pointer',
+            }}
+          >
+            Abmelden
+          </button>
+        </header>
+
+        <main style={{ flex: 1, padding: '32px 40px', overflow: 'auto' }}>
+          {activeTab === 'customers' && <CustomersPage />}
+          {activeTab === 'products' && <ProductsPage />}
+          {activeTab === 'unifi' && <UnifiPage />}
+          {activeTab === 'sophos' && <SophosPage />}
+          {activeTab === 'sync' && <SyncOverview />}
+          {activeTab === 'settings' && <SettingsPage />}
+          {activeTab === 'users' && <UserManagement />}
+          {activeTab === 'logs' && <AuditLogs />}
+        </main>
+      </div>
     </div>
   );
 }

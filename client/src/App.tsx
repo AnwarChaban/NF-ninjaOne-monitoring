@@ -1,7 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { fetchProducts, fetchSettings, type ProductStatus } from './api';
+import { fetchProducts, fetchSettings, getStoredUser, clearAuthSession, apiFetch, type ProductStatus, type AuthUser } from './api';
+
+interface SecretExpiry {
+  key: string;
+  label: string;
+  daysUntilExpiry: number | null;
+  isExpired: boolean;
+}
 import ProductCard from './components/ProductCard';
 import AdminLayout from './components/AdminLayout';
+import Sidebar from './components/Sidebar';
+import BackupPage from './components/BackupPage';
+import CustomerOverview from './components/CustomerOverview';
+import CustomerDetailPage from './components/CustomerDetailPage';
+import SophosDashboard from './components/SophosDashboard';
+import Login from './components/Login';
+
+type GroupBy = 'software' | 'kunde';
 
 const REFRESH_INTERVAL = 60_000; // Auto-refresh every 60 seconds
 
@@ -18,10 +33,10 @@ function useHash() {
 function Dashboard() {
   const [products, setProducts] = useState<ProductStatus[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mockMode, setMockMode] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [showUpToDateDevices, setShowUpToDateDevices] = useState(false);
+  const [groupBy, setGroupBy] = useState<GroupBy>('software');
 
   async function loadProducts() {
     try {
@@ -39,7 +54,6 @@ function Dashboard() {
   async function loadSettings() {
     try {
       const settings = await fetchSettings();
-      setMockMode(settings.mockMode === 'false');
       setShowUpToDateDevices(settings.showUpToDateDevices === 'true');
     } catch {
       // ignore
@@ -137,11 +151,11 @@ function Dashboard() {
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 16px' }}>
-      <header style={{ marginBottom: '32px' }}>
+      <header style={{ marginBottom: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9' }}>
-              Version Checker
+              NetFactory Monitoring
             </h1>
             <p style={{ color: '#64748b', fontSize: '14px', marginTop: '4px' }}>
               {totalDevices} Geräte überwacht
@@ -150,25 +164,39 @@ function Dashboard() {
                   {updatesAvailable} Update(s) verfügbar
                 </span>
               )}
-             
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <a
-              href="#/admin"
-              style={{
-                padding: '6px 14px', borderRadius: '6px', border: '1px solid #334155',
-                color: '#94a3b8', textDecoration: 'none', fontSize: '13px', fontWeight: 500,
-              }}
-            >
-              Admin
-            </a>
             {lastUpdate && (
               <span style={{ color: '#64748b', fontSize: '12px' }}>
                 Aktualisiert: {lastUpdate.toLocaleTimeString('de-DE')}
               </span>
             )}
           </div>
+        </div>
+
+        {/* Toggle: Nach Software / Nach Kunde */}
+        <div style={{ display: 'flex', gap: '4px', marginTop: '20px', background: '#0f172a', borderRadius: '8px', padding: '4px', width: 'fit-content' }}>
+          {(['software', 'kunde'] as GroupBy[]).map(view => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => setGroupBy(view)}
+              style={{
+                padding: '6px 18px',
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                backgroundColor: groupBy === view ? '#1e293b' : 'transparent',
+                color: groupBy === view ? '#f1f5f9' : '#64748b',
+                transition: 'all 0.15s',
+              }}
+            >
+              {view === 'software' ? 'Nach Software' : 'Nach Kunde'}
+            </button>
+          ))}
         </div>
       </header>
 
@@ -185,7 +213,9 @@ function Dashboard() {
         </div>
       )}
 
-      {loading ? (
+      {groupBy === 'kunde' ? (
+        <CustomerOverview embedded />
+      ) : loading ? (
         <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>Lade Daten...</p>
       ) : (
         <div style={{
@@ -207,9 +237,76 @@ function Dashboard() {
   );
 }
 
+function ExpiryBanner() {
+  const [expiring, setExpiring] = useState<SecretExpiry[]>([]);
+
+  useEffect(() => {
+    if (getStoredUser()?.role !== 'administrator') return;
+    apiFetch('/api/settings/expiry')
+      .then(r => r.ok ? r.json() : [])
+      .then((data: SecretExpiry[]) => setExpiring(data.filter(s => s.isExpired || (s.daysUntilExpiry !== null && s.daysUntilExpiry <= 14))))
+      .catch(() => {});
+  }, []);
+
+  if (expiring.length === 0) return null;
+
+  const msg = expiring.map(s => s.isExpired ? `${s.label} (abgelaufen)` : `${s.label} (${s.daysUntilExpiry}d)`).join(', ');
+  return (
+    <div style={{
+      backgroundColor: expiring.some(s => s.isExpired) ? '#7f1d1d' : '#78350f',
+      color: expiring.some(s => s.isExpired) ? '#fca5a5' : '#fbbf24',
+      padding: '8px 20px', fontSize: '13px', display: 'flex',
+      justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+    }}>
+      <span>{expiring.some(s => s.isExpired) ? '❌' : '⚠️'} API-Schlüssel: {msg}</span>
+      <a href="#/admin" style={{ color: 'inherit', fontWeight: 700, marginLeft: '16px' }}>→ Einstellungen</a>
+    </div>
+  );
+}
+
 export default function App() {
   const hash = useHash();
-  const isAdmin = hash.startsWith('#/admin');
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getStoredUser());
 
-  return isAdmin ? <AdminLayout /> : <Dashboard />;
+  function handleLogin() {
+    setCurrentUser(getStoredUser());
+  }
+
+  function handleLogout() {
+    clearAuthSession();
+    setCurrentUser(null);
+    location.hash = '#/';
+  }
+
+  if (!currentUser) {
+    return <Login onLogin={handleLogin} />;
+  }
+
+  const isAdmin = hash.startsWith('#/admin');
+  const isBackup = hash.startsWith('#/backup');
+  const isSophos = hash.startsWith('#/sophos');
+
+  if (isAdmin) return <AdminLayout currentUser={currentUser} onLogout={handleLogout} />;
+
+  const customerDetailMatch = hash.match(/^#\/customers\/(\d+)$/);
+  const customerDetailId = customerDetailMatch ? parseInt(customerDetailMatch[1]) : null;
+
+  const activeView = isBackup ? 'backup' : isSophos ? 'sophos' : 'versions';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      <ExpiryBanner />
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <Sidebar activeView={activeView} currentUser={currentUser} onLogout={handleLogout} />
+      <main style={{ flex: 1, overflowY: 'auto' }}>
+        {isBackup && <BackupPage />}
+        {isSophos && <SophosDashboard />}
+        {!isBackup && !isSophos && customerDetailId !== null && (
+          <CustomerDetailPage customerId={customerDetailId} />
+        )}
+        {!isBackup && !isSophos && customerDetailId === null && <Dashboard />}
+      </main>
+      </div>
+    </div>
+  );
 }

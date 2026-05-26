@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend debuggen",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/tsx",
+      "args": ["server/index.ts"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "sourceMaps": true,
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "outFiles": ["${workspaceFolder}/dist/server/**/*.js"],
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"]
+    },
+    {
+      "name": "Frontend debuggen (Edge)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/client/src",
+      "sourceMapPathOverrides": {
+        "/@fs/*": "${workspaceFolder}/*",
+        "/src/*": "${workspaceFolder}/client/src/*"
+      }
+    },
+    {
+      "name": "Frontend debuggen (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/client/src",
+      "sourceMapPathOverrides": {
+        "/@fs/*": "${workspaceFolder}/*",
+        "/src/*": "${workspaceFolder}/client/src/*"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack (Backend + Frontend)",
+      "configurations": ["Backend debuggen", "Frontend debuggen (Edge)"],
+      "stopAll": true
+    }
+  ]
+}

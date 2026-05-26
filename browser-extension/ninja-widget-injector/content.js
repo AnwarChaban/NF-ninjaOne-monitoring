@@ -1,222 +1,189 @@
-const ROOT_ID = "nf-local-version-widget";
-const HIDDEN_STATE_KEY = "nfLocalWidgetHidden";
-const ANCHOR_TEST_IDS = [
-  "Gerätegesundheitsprobleme-dashboard-widget",
-  "Geraetegesundheitsprobleme-dashboard-widget"
-];
-const CONTAINER_SELECTORS = [
-  ".dashboard-grid",
-  ".react-grid-layout",
-  "[data-testid='dashboard-grid']",
-  "main .grid",
-  "main"
-];
+// ── NetFactory Monitoring Panel ────────────────────────────────────────────────
 
-const INSERT_MODE = "append";
+const PANEL_BTN_ID     = 'nf-monitoring-btn';
+const PANEL_ID         = 'nf-monitoring-panel';
+const BACKDROP_ID      = 'nf-monitoring-backdrop';
 
-function saveHiddenState(isHidden) {
-  if (chrome?.storage?.local) {
-    chrome.storage.local.set({ [HIDDEN_STATE_KEY]: isHidden });
-    return;
+function closePanel() {
+  const panel    = document.getElementById(PANEL_ID);
+  const backdrop = document.getElementById(BACKDROP_ID);
+  if (panel) {
+    panel.style.transform = 'translateX(100%)';
+    setTimeout(() => panel.remove(), 260);
   }
-
-  try {
-    window.localStorage.setItem(HIDDEN_STATE_KEY, JSON.stringify(isHidden));
-  } catch {
-    // ignore persistence errors
-  }
+  if (backdrop) backdrop.remove();
 }
 
-function loadHiddenState(callback) {
-  if (chrome?.storage?.local) {
-    chrome.storage.local.get([HIDDEN_STATE_KEY], (result) => {
-      callback(Boolean(result?.[HIDDEN_STATE_KEY]));
-    });
-    return;
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(HIDDEN_STATE_KEY);
-    callback(rawValue === "true");
-  } catch {
-    callback(false);
-  }
-}
-
-function findDashboardContainer() {
-  for (const selector of CONTAINER_SELECTORS) {
-    const element = document.querySelector(selector);
-    if (element) {
-      return element;
-    }
-  }
-  return null;
-}
-
-function buildCard() {
-  const wrapper = document.createElement("section");
-  wrapper.id = ROOT_ID;
-  wrapper.setAttribute("data-nf-widget", "true");
-  wrapper.style.background = "#fff";
-  wrapper.style.borderRadius = "12px";
-  wrapper.style.boxShadow = "0 2px 12px rgba(0, 0, 0, 0.08)";
-  wrapper.style.border = "1px solid #e6e8ec";
-  wrapper.style.padding = "0";
-  wrapper.style.overflow = "hidden";
-  wrapper.style.minHeight = "280px";
-  wrapper.style.width = "100%";
-
-  const header = document.createElement("div");
-  header.style.padding = "10px 14px";
-  header.style.borderBottom = "1px solid #eef0f3";
-
-  const title = document.createElement("span");
-  title.style.fontFamily = "Inter, Segoe UI, Arial, sans-serif";
-  title.style.fontSize = "13px";
-  title.style.fontWeight = "600";
-  title.style.color = "#2b2f36";
-  title.textContent = "Net Factory Update-Widget (lokal)";
-
-  const frame = document.createElement("iframe");
-  frame.src = chrome.runtime.getURL("widget.html");
-  frame.title = "Local Version Widget";
-  frame.style.display = "block";
-  frame.style.width = "100%";
-  frame.style.height = "420px";
-  frame.style.border = "0";
-  frame.loading = "lazy";
-
-  function onMessage(event) {
-    if (event.source !== frame.contentWindow) {
-      return;
-    }
-
-    if (!event.data || event.data.type !== "NF_WIDGET_HEIGHT") {
-      return;
-    }
-
-    const nextHeight = Number(event.data.height);
-    if (Number.isFinite(nextHeight) && nextHeight > 120) {
-      frame.style.height = `${Math.min(nextHeight + 8, 2400)}px`;
-    }
-  }
-
-  window.addEventListener("message", onMessage);
-
-  header.appendChild(title);
-  wrapper.appendChild(header);
-  wrapper.appendChild(frame);
-  return wrapper;
-}
-
-function buildSlot(card) {
-  const slot = document.createElement("div");
-  slot.id = `${ROOT_ID}-slot`;
-  slot.style.width = "100%";
-  slot.style.maxWidth = "100%";
-  slot.style.height = "auto";
-  slot.style.minHeight = "0";
-  slot.style.alignSelf = "stretch";
-
-  const controlRow = document.createElement("div");
-  controlRow.style.display = "flex";
-  controlRow.style.justifyContent = "flex-end";
-  controlRow.style.marginBottom = "8px";
-
-  const visibilityButton = document.createElement("button");
-  visibilityButton.type = "button";
-  visibilityButton.style.border = "1px solid #d0d5dd";
-  visibilityButton.style.background = "#fff";
-  visibilityButton.style.color = "#344054";
-  visibilityButton.style.fontSize = "12px";
-  visibilityButton.style.fontWeight = "600";
-  visibilityButton.style.padding = "4px 8px";
-  visibilityButton.style.borderRadius = "6px";
-  visibilityButton.style.cursor = "pointer";
-
-  function applyHidden(isHidden) {
-    card.style.display = isHidden ? "none" : "block";
-    visibilityButton.textContent = isHidden ? "Widget anzeigen" : "Widget ausblenden";
-    visibilityButton.setAttribute("aria-pressed", String(isHidden));
-  }
-
-  visibilityButton.addEventListener("click", () => {
-    const nextHidden = card.style.display !== "none";
-    applyHidden(nextHidden);
-    saveHiddenState(nextHidden);
+async function buildPanel() {
+  const panel = document.createElement('div');
+  panel.id = PANEL_ID;
+  Object.assign(panel.style, {
+    position: 'fixed', top: '0', right: '0',
+    width: '1100px', maxWidth: '96vw', height: '100vh',
+    background: '#1e293b', boxShadow: '-4px 0 32px rgba(0,0,0,0.25)',
+    zIndex: '99999', display: 'flex', flexDirection: 'column',
+    transform: 'translateX(100%)', transition: 'transform 0.25s ease',
   });
 
-  loadHiddenState((isHidden) => applyHidden(isHidden));
+  // Header
+  const header = document.createElement('div');
+  Object.assign(header.style, {
+    padding: '14px 20px', borderBottom: '1px solid #334155',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    background: '#0f172a', flexShrink: '0',
+  });
 
-  controlRow.appendChild(visibilityButton);
-  slot.appendChild(controlRow);
-  slot.appendChild(card);
-  return slot;
+  const left = document.createElement('div');
+  left.style.cssText = 'display:flex;align-items:center;gap:10px;';
+  left.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </svg>`;
+  const title = document.createElement('span');
+  Object.assign(title.style, {
+    fontSize: '15px', fontWeight: '700', color: '#f1f5f9',
+    fontFamily: 'Inter,Segoe UI,sans-serif',
+  });
+  title.textContent = 'NetFactory Monitoring';
+  left.appendChild(title);
+
+  const closeBtn = document.createElement('button');
+  Object.assign(closeBtn.style, {
+    background: 'none', border: 'none', color: '#94a3b8',
+    fontSize: '22px', cursor: 'pointer', padding: '2px 8px',
+    borderRadius: '4px', lineHeight: '1',
+  });
+  closeBtn.innerHTML = '&times;';
+  closeBtn.addEventListener('click', closePanel);
+
+  header.appendChild(left);
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+
+  // Widget iframe (fills the panel)
+  const frame = document.createElement('iframe');
+  const runtimeAPI = typeof browser !== 'undefined' ? browser : chrome;
+  const ninjaUid = await getNinjaUid();
+  const widgetBase = runtimeAPI.runtime.getURL('widget.html');
+  frame.src = ninjaUid ? `${widgetBase}?ninja_uid=${encodeURIComponent(ninjaUid)}` : widgetBase;
+  frame.title = 'NetFactory Monitoring';
+  Object.assign(frame.style, { flex: '1', width: '100%', border: '0', display: 'block' });
+  panel.appendChild(frame);
+
+  // Backdrop
+  const backdrop = document.createElement('div');
+  backdrop.id = BACKDROP_ID;
+  Object.assign(backdrop.style, {
+    position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+    background: 'rgba(0,0,0,0.3)', zIndex: '99998',
+  });
+  backdrop.addEventListener('click', closePanel);
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(panel);
+
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    panel.style.transform = 'translateX(0)';
+  }));
 }
 
-function findAnchorWidget() {
-  for (const testId of ANCHOR_TEST_IDS) {
-    const anchor = document.querySelector(`[data-testid='${testId}']`);
-    if (anchor) {
-      return anchor;
+function buildSidebarButton() {
+  const btn = document.createElement('button');
+  btn.id = PANEL_BTN_ID;
+  btn.type = 'button';
+  btn.title = 'NetFactory Monitoring';
+  Object.assign(btn.style, {
+    display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
+    gap: '10px',
+    width: '100%', padding: '8px 16px',
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    borderRadius: '6px', color: '#ecf2f7',
+    fontFamily: 'Inter,"Segoe UI",Arial,sans-serif',
+    overflow: 'hidden',
+  });
+  btn.innerHTML = `
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+    <span style="font-size:14px;font-weight:500;white-space:nowrap;margin-left:6px;">NetFactory Monitoring</span>
+  `;
+  btn.addEventListener('mouseenter', () => {
+    btn.style.color = '#111827';
+    btn.style.background = 'rgba(0,0,0,0.06)';
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.color = '#e6eeff';
+    btn.style.background = 'transparent';
+  });
+  btn.addEventListener('click', () => {
+    if (document.getElementById(PANEL_ID)) {
+      closePanel();
+    } else {
+      buildPanel();
     }
-  }
-
-  return null;
+  });
+  return btn;
 }
 
-function inject() {
-  if (document.getElementById(ROOT_ID)) {
-    return true;
+// ── NinjaOne User Detection via sessionproperties ─────────────────────────────
+
+let cachedNinjaUid = null;
+
+async function getNinjaUid() {
+  if (cachedNinjaUid) return cachedNinjaUid;
+  try {
+    const res = await fetch(
+      `${window.location.origin}/ws/webapp/sessionproperties`,
+      { credentials: 'include', cache: 'no-store' }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const uid = data.appUserUid || data.userUid || null;
+    if (uid) cachedNinjaUid = uid;
+    return uid;
+  } catch {
+    return null;
   }
+}
 
-  const anchor = findAnchorWidget();
-  const card = buildCard();
+// ── Sidebar Injection ──────────────────────────────────────────────────────────
 
-  if (anchor && anchor.parentElement) {
-    const slot = buildSlot(card);
-    const anchorComputed = window.getComputedStyle(anchor);
-    if (anchorComputed.gridColumnStart !== "auto" || anchorComputed.gridColumnEnd !== "auto") {
-      slot.style.gridColumn = "span 1";
+function findAdminListItem() {
+  const adminLink =
+    document.querySelector('a[href="#/administration/general/settings"]') ||
+    document.querySelector('a[aria-label="Administration"]');
+  if (!adminLink) return null;
+
+  let target = adminLink.closest('li');
+  if (!target) {
+    target = adminLink.parentElement;
+    while (target && target.tagName !== 'LI' && target !== document.body) {
+      target = target.parentElement;
     }
-    if (anchorComputed.gridRowStart !== "auto" || anchorComputed.gridRowEnd !== "auto") {
-      slot.style.gridRow = "auto";
-    }
-    card.setAttribute("data-testid", "Net-Factory-Update-Widget-dashboard-widget");
-    anchor.insertAdjacentElement("afterend", slot);
-    return true;
   }
+  return target && target !== document.body ? target : null;
+}
 
-  const container = findDashboardContainer();
-  if (!container) {
-    return false;
-  }
+function injectSidebarButtons() {
+  if (document.getElementById(PANEL_BTN_ID)) return true;
 
-  if (INSERT_MODE === "prepend") {
-    container.prepend(card);
-  } else {
-    container.appendChild(card);
-  }
+  const adminItem = findAdminListItem();
+  if (!adminItem || !adminItem.parentElement) return false;
+
+  const wrapper = document.createElement('li');
+  wrapper.style.cssText = 'list-style:none;overflow:hidden;';
+  wrapper.appendChild(buildSidebarButton());
+  adminItem.parentElement.insertBefore(wrapper, adminItem);
 
   return true;
 }
 
 function boot() {
-  if (inject()) {
-    return;
-  }
+  if (injectSidebarButtons()) return;
 
   const observer = new MutationObserver(() => {
-    if (inject()) {
-      observer.disconnect();
-    }
+    if (injectSidebarButtons()) observer.disconnect();
   });
-
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true
-  });
-
+  observer.observe(document.documentElement, { childList: true, subtree: true });
   window.setTimeout(() => observer.disconnect(), 30000);
 }
 

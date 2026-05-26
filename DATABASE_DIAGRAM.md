@@ -1,21 +1,34 @@
-# Datenbank-Diagramm
+# Datenbank-Diagramm (Vereinfachte Struktur)
+
+## ER-Diagramm
 
 ```mermaid
 erDiagram
-    direction LR
+    direction TB
 
-    VERSION_CACHE {
-        text product PK
-        text latest_version
-        text release_url
-        text checked_at
+    CUSTOMERS {
+        integer id PK
+        text name
+        text created_at
+        text updated_at
     }
 
-    CHECK_HISTORY {
+    PRODUCTS {
+        text id PK "synology-dsm, sophos-firewall, etc."
+        text name
+        text type "scraped|custom"
+        integer active
+        text created_at
+    }
+
+    PRODUCT_VERSIONS {
         integer id PK
-        text product
+        text product_id FK
         text version
+        text source "scraped|ninjaone|unifi|sophos"
+        text release_url
         text checked_at
+        unique "product_id, version, source"
     }
 
     SETTINGS {
@@ -23,91 +36,172 @@ erDiagram
         text value
     }
 
-    SCRAPER_PRODUCTS {
-        text product PK
-        integer active
-    }
-
-    CUSTOM_PRODUCTS {
-        text id PK
+    NINJAONE_CUSTOMERS {
+        integer id PK
+        integer customer_id FK "UNIQUE"
+        text ninja_org_id "UNIQUE - externe Org-ID"
         text name
-        text latest_version
-        text release_url
-        integer active
         text created_at
         text updated_at
     }
 
-    MOCK_CUSTOMERS {
+    NINJAONE_DEVICES {
         integer id PK
+        integer ninjaone_customer_id FK
+        text product_id FK
+        text external_device_id "externe NinjaOne Device ID"
         text name
-        integer source_connector_id FK
-    }
-
-    MOCK_DEVICES {
-        integer id PK
-        integer customer_id FK
-        text name
-        text product
         text current_version
-        integer org_id
-        integer ninja_device_id
-        integer source_connector_id FK
-        text source
-        text latest_version
-    }
-
-    UNIFI_CUSTOMER_MAPPINGS {
-        integer id PK
-        text match_text UK
-        integer customer_id FK
-        text created_at
-    }
-
-    UNIFI_UNMATCHED_HOSTS {
-        integer id PK
-        text host_id
-        text host_name
-        text reason
-        text synced_at
-    }
-
-    CONNECTORS {
-        integer id PK
-        text name
-        text type
-        text base_url
-        text token_url
-        text auth_mode
-        text api_key
-        text client_id
-        text client_secret
-        integer active
-        text product_scope
-        text customer_scope_mode
-        text field_mapping_json
-        text ui_color
-        text last_test_at
-        text last_test_status
-        text last_test_message
-        text last_sync_at
-        text last_sync_status
-        text last_sync_message
         text created_at
         text updated_at
     }
 
-    CONNECTOR_CUSTOMER_SCOPE {
-        integer connector_id PK, FK
-        integer customer_id PK, FK
-        integer enabled
+    UNIFI_CUSTOMERS {
+        integer id PK
+        integer customer_id FK "UNIQUE"
+        text unifi_customer_id "UNIQUE - externe Kunden-ID"
+        text name
+        text created_at
+        text updated_at
     }
 
-    MOCK_CUSTOMERS ||--o{ MOCK_DEVICES : has
-    MOCK_CUSTOMERS ||--o{ UNIFI_CUSTOMER_MAPPINGS : maps
-    CONNECTORS ||--o{ CONNECTOR_CUSTOMER_SCOPE : scopes
-    MOCK_CUSTOMERS ||--o{ CONNECTOR_CUSTOMER_SCOPE : scoped_for
+    UNIFI_DEVICES {
+        integer id PK
+        integer unifi_customer_id FK
+        text product_id FK
+        text external_device_id "externe Unifi Device ID"
+        text name
+        text current_version
+        text created_at
+        text updated_at
+    }
 
-    CONNECTORS ||--o{ MOCK_CUSTOMERS : source_connector
-    CONNECTORS ||--o{ MOCK_DEVICES : source_connector
+    SOPHOS_CUSTOMERS {
+        integer id PK
+        integer customer_id FK "UNIQUE"
+        text sophos_customer_id "UNIQUE - externe Kunden-ID"
+        text name
+        text created_at
+        text updated_at
+    }
+
+    SOPHOS_DEVICES {
+        integer id PK
+        integer sophos_customer_id FK
+        text product_id FK
+        text external_device_id "externe Sophos Device ID"
+        text name
+        text current_version
+        text created_at
+        text updated_at
+    }
+
+    CUSTOMERS ||--o{ NINJAONE_CUSTOMERS : "hat 0..1"
+    CUSTOMERS ||--o{ UNIFI_CUSTOMERS : "hat 0..1"
+    CUSTOMERS ||--o{ SOPHOS_CUSTOMERS : "hat 0..1"
+
+    NINJAONE_CUSTOMERS ||--o{ NINJAONE_DEVICES : "hat 1..*"
+    UNIFI_CUSTOMERS ||--o{ UNIFI_DEVICES : "hat 1..*"
+    SOPHOS_CUSTOMERS ||--o{ SOPHOS_DEVICES : "hat 1..*"
+
+    PRODUCTS ||--o{ PRODUCT_VERSIONS : "hat 1..*"
+    PRODUCTS ||--o{ NINJAONE_DEVICES : "ist_in"
+    PRODUCTS ||--o{ UNIFI_DEVICES : "ist_in"
+    PRODUCTS ||--o{ SOPHOS_DEVICES : "ist_in"
+```
+
+## Architektur-Übersicht
+
+### Zentrale Tabellen
+| Tabelle | Zweck | Besonderheit |
+|---------|-------|-------------|
+| **CUSTOMERS** | Zentrale Kundenbasis | 1:1 Zuordnung zu Software-Accounts |
+| **PRODUCTS** | Produktkatalog | Einzigartig pro Typ/Quelle |
+| **PRODUCT_VERSIONS** | Versionshistorie | Mehrere Quellen pro Produkt möglich |
+| **SETTINGS** | Konfiguration | Keine Secrets (nur Runtime-Settings) |
+
+### Pro-Software Integration (3 Schnittstellen)
+
+#### NinjaOne
+```
+NINJAONE_CUSTOMERS (externe Org-ID)
+    ↓
+NINJAONE_DEVICES (Geräte von NinjaOne API)
+    ↓
+products: synology-dsm, sophos-firewall, teamviewer, proxmox-ve, etc.
+```
+
+#### Unifi
+```
+UNIFI_CUSTOMERS (externe Customer-ID)
+    ↓
+UNIFI_DEVICES (Geräte von Unifi API)
+    ↓
+products: unifi-network, unifi-os
+```
+
+#### Sophos
+```
+SOPHOS_CUSTOMERS (externe Kunden-ID)
+    ↓
+SOPHOS_DEVICES (Geräte von Sophos API)
+    ↓
+products: sophos-firewall (optional: weitere Sophos-Produkte)
+```
+
+## Datenfluss
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    DATENQUELLEN                             │
+├─────────────────────────────────────────────────────────────┤
+│ • NinjaOne API → NINJAONE_DEVICES                           │
+│ • Unifi API → UNIFI_DEVICES                                 │
+│ • Sophos API → SOPHOS_DEVICES                               │
+│ • Web Scraper → PRODUCT_VERSIONS (source='scraped')         │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+            Speichern in PRODUCT_VERSIONS
+            (mit Quelle: scraped|ninjaone|unifi|sophos)
+                          ↓
+              COMPARATOR: Vergleiche
+              aktuelle_version vs. latest_version
+                          ↓
+             NOTIFIER: Benachrichtigungen
+        (Webhook, Slack, Console, etc.)
+```
+
+## Wichtige Eigenschaften
+
+✅ **Saubere Trennung:** Jede Software hat eigene Customer/Device-Tabellen  
+✅ **Einheitliche Produkte:** Ein Produkt kann von mehreren Quellen kommen  
+✅ **Versionsverlauf:** product_versions mit Quelltracking  
+✅ **Keine Redundanz:** Keine connector_customers/devices mehr  
+✅ **Skalierbar:** Neue Softwares leicht hinzufügbar (copy-paste-pattern)
+
+## Beispiel-Datenfluss
+
+### Kunde: Mustermann GmbH (customer_id=1)
+
+```
+CUSTOMERS[1]
+├─ NINJAONE_CUSTOMERS[1]
+│  └─ NINJAONE_DEVICES
+│     ├─ NAS-01 → synology-dsm:7.1.1
+│     ├─ FW-01 → sophos-firewall:19.5.3
+│     └─ TV-01 → teamviewer:15.51.6
+│
+├─ UNIFI_CUSTOMERS[1]
+│  └─ UNIFI_DEVICES
+│     └─ UNIFI-01 → unifi-network:7.5.187
+│
+└─ SOPHOS_CUSTOMERS: null (noch nicht konfiguriert)
+
+PRODUCTS
+├─ synology-dsm
+│  └─ PRODUCT_VERSIONS[source=scraped] → 7.3.2
+├─ sophos-firewall
+│  ├─ PRODUCT_VERSIONS[source=scraped] → 22.0 MR1
+│  └─ PRODUCT_VERSIONS[source=sophos] → 22.0.1
+└─ ...
 ```

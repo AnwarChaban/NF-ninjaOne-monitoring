@@ -2,9 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   fetchCustomers, createCustomer, updateCustomer, deleteCustomer,
   createDevice, updateDevice, deleteDevice,
-  fetchScraperProducts, fetchCustomProducts, triggerNinjaSync, triggerUnifiSync,
-  fetchUnifiMappings, createUnifiMapping, deleteUnifiMapping, fetchUnifiUnmatchedHosts,
-  type MockCustomer, type MockDevice, type ScraperProduct, type CustomProduct, type UnifiCustomerMapping, type UnifiUnmatchedHost,
+  fetchScraperProducts, fetchCustomProducts, triggerNinjaSync,
+  type Customer, type CustomerDevice, type ScraperProduct, type CustomProduct,
 } from '../../api';
 
 const inputStyle: React.CSSProperties = {
@@ -26,14 +25,15 @@ interface GroupedDevice {
   name: string;
   orgId?: number;
   ninjaDeviceId?: number;
-  entries: MockDevice[];
+  entries: CustomerDevice[];
 }
 
-function isUnknownEntry(device: MockDevice): boolean {
+function isUnknownEntry(device: CustomerDevice): boolean {
+  if (!device.product) return false;
   return device.product.toLowerCase() === 'unknown' && device.currentVersion.toLowerCase() === 'unknown';
 }
 
-function groupDevices(devices: MockDevice[]): GroupedDevice[] {
+function groupDevices(devices: CustomerDevice[]): GroupedDevice[] {
   const map = new Map<string, GroupedDevice>();
 
   for (const device of devices) {
@@ -63,31 +63,24 @@ function groupDevices(devices: MockDevice[]): GroupedDevice[] {
 
       return {
         ...group,
-        entries: [...normalizedEntries].sort((a, b) => a.product.localeCompare(b.product)),
+        entries: [...normalizedEntries].sort((a, b) => (a.product ?? '').localeCompare(b.product ?? '')),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<MockCustomer[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<string[]>([]);
   const [newName, setNewName] = useState('');
   const [editingCustomer, setEditingCustomer] = useState<{ id: number; name: string } | null>(null);
   const [expandedCustomers, setExpandedCustomers] = useState<Record<number, boolean>>({});
   const [addingDevice, setAddingDevice] = useState<number | null>(null);
   const [deviceForm, setDeviceForm] = useState<{ name: string; versions: Record<string, string> }>({ name: '', versions: {} });
-  const [editingDevice, setEditingDevice] = useState<(MockDevice & { customerId: number }) | null>(null);
+  const [editingDevice, setEditingDevice] = useState<(CustomerDevice & { customerId: number }) | null>(null);
   const [expandedDevices, setExpandedDevices] = useState<Record<string, boolean>>({});
   const [isSyncingNinja, setIsSyncingNinja] = useState(false);
-  const [isSyncingUnifi, setIsSyncingUnifi] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [unifiMappings, setUnifiMappings] = useState<UnifiCustomerMapping[]>([]);
-  const [unmatchedHosts, setUnmatchedHosts] = useState<UnifiUnmatchedHost[]>([]);
-  const [isUnifiMappingExpanded, setIsUnifiMappingExpanded] = useState(false);
-  const [mappingForm, setMappingForm] = useState<{ hostName: string; customerId: string }>({ hostName: '', customerId: '' });
-  const [isSavingMapping, setIsSavingMapping] = useState(false);
-  const [mappingMessage, setMappingMessage] = useState<string | null>(null);
   const hasAutoSyncedRef = useRef(false);
   const [addingProductForDevice, setAddingProductForDevice] = useState<{
     customerId: number;
@@ -100,17 +93,13 @@ export default function CustomersPage() {
   } | null>(null);
 
   async function load() {
-    const [c, sp, cp, mappings, unmatched] = await Promise.all([
-      fetchCustomers(),
-      fetchScraperProducts(),
-      fetchCustomProducts(),
-      fetchUnifiMappings(),
-      fetchUnifiUnmatchedHosts(),
+    const [c, sp, cp] = await Promise.all([
+      fetchCustomers().catch(() => [] as typeof customers),
+      fetchScraperProducts().catch(() => [] as ScraperProduct[]),
+      fetchCustomProducts().catch(() => [] as CustomProduct[]),
     ]);
     setCustomers(c);
     setProducts([...sp.map(p => p.product), ...cp.map(p => p.id)]);
-    setUnifiMappings(mappings);
-    setUnmatchedHosts(unmatched);
   }
 
   function toggleExpandedDevice(key: string) {
@@ -135,83 +124,8 @@ export default function CustomersPage() {
     }
   }
 
-  async function handleUnifiSync() {
-    setIsSyncingUnifi(true);
-    setSyncMessage(null);
-    try {
-      const result = await triggerUnifiSync();
-      setSyncMessage(
-        `UniFi synchronisiert: ${result.hosts} Hosts, ${result.devices} Geräte, ${result.unmatchedHosts} ohne Match, ${result.ambiguousHosts} mehrdeutig`
-      );
-      await load();
-    } catch (error) {
-      setSyncMessage((error as Error).message || 'UniFi-Sync fehlgeschlagen');
-    } finally {
-      setIsSyncingUnifi(false);
-    }
-  }
-
-  async function handleCreateMapping() {
-    const matchText = mappingForm.hostName.trim();
-    const customerId = Number(mappingForm.customerId);
-
-    if (!matchText || !Number.isFinite(customerId) || customerId <= 0) {
-      setMappingMessage('Bitte UniFi Host und Kunden auswählen');
-      return;
-    }
-
-    setIsSavingMapping(true);
-    setMappingMessage(null);
-    try {
-      await createUnifiMapping({ matchText, customerId });
-      setMappingForm({ hostName: '', customerId: '' });
-      setMappingMessage('Mapping gespeichert');
-      await load();
-    } catch (error) {
-      setMappingMessage((error as Error).message || 'Mapping konnte nicht gespeichert werden');
-    } finally {
-      setIsSavingMapping(false);
-    }
-  }
-
-  async function handleDeleteMapping(id: number) {
-    if (!confirm('Mapping löschen?')) return;
-    await deleteUnifiMapping(id);
-    await load();
-  }
-
-  async function handleAutoSyncSequence() {
-    setSyncMessage('Automatische Synchronisierung: NinjaOne startet...');
-
-    setIsSyncingNinja(true);
-    try {
-      const ninjaResult = await triggerNinjaSync();
-      setSyncMessage(`NinjaOne synchronisiert: ${ninjaResult.customers} Kunden, ${ninjaResult.devices} Produkt-Einträge. Starte UniFi...`);
-    } catch (error) {
-      setSyncMessage((error as Error).message || 'NinjaOne-Sync fehlgeschlagen');
-    } finally {
-      setIsSyncingNinja(false);
-    }
-
-    setIsSyncingUnifi(true);
-    try {
-      const unifiResult = await triggerUnifiSync();
-      setSyncMessage(
-        `UniFi synchronisiert: ${unifiResult.hosts} Hosts, ${unifiResult.devices} Geräte, ${unifiResult.unmatchedHosts} ohne Match, ${unifiResult.ambiguousHosts} mehrdeutig`
-      );
-    } catch (error) {
-      setSyncMessage((error as Error).message || 'UniFi-Sync fehlgeschlagen');
-    } finally {
-      setIsSyncingUnifi(false);
-      await load();
-    }
-  }
-
   useEffect(() => {
-    if (hasAutoSyncedRef.current) return;
-    hasAutoSyncedRef.current = true;
-
-    handleAutoSyncSequence();
+    load();
   }, []);
 
   async function handleCreateCustomer() {
@@ -314,109 +228,13 @@ export default function CustomersPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '12px', flexWrap: 'wrap' }}>
         <h2 style={{ color: '#f1f5f9', fontSize: '22px', fontWeight: 700, margin: 0 }}>Kunden & Geräte</h2>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button style={primaryBtn} onClick={handleNinjaSync} disabled={isSyncingNinja || isSyncingUnifi}>
-            {isSyncingNinja ? 'NinjaOne Sync läuft...' : 'NinjaOne jetzt synchronisieren'}
-          </button>
-          <button style={ghostBtn} onClick={handleUnifiSync} disabled={isSyncingNinja || isSyncingUnifi}>
-            {isSyncingUnifi ? 'UniFi Sync läuft...' : 'UniFi jetzt synchronisieren'}
-          </button>
-        </div>
+        <button style={primaryBtn} onClick={handleNinjaSync} disabled={isSyncingNinja}>
+          {isSyncingNinja ? 'NinjaOne Sync läuft...' : 'NinjaOne jetzt synchronisieren'}
+        </button>
       </div>
       {syncMessage && (
         <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>{syncMessage}</div>
       )}
-
-      <div style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '16px', marginBottom: '20px' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            cursor: 'pointer',
-            padding: '2px 0',
-            marginBottom: isUnifiMappingExpanded ? '12px' : 0,
-          }}
-          onClick={() => setIsUnifiMappingExpanded(prev => !prev)}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f1f5f9', fontSize: '16px', fontWeight: 600 }}>
-            <span style={{ color: '#94a3b8', fontSize: '13px' }}>{isUnifiMappingExpanded ? '▾' : '▸'}</span>
-            <span>UniFi Host-Mapping (manuell)</span>
-            <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 400, marginLeft: '8px' }}>
-              ({unifiMappings.length} Mappings)
-            </span>
-          </div>
-        </div>
-
-        {isUnifiMappingExpanded && (
-          <>
-            <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>
-              Wähle einen aktuell nicht gematchten UniFi-Host und ordne ihn einem Kunden zu.
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr auto', gap: '8px', marginBottom: '10px' }}>
-              <select
-                style={inputStyle}
-                value={mappingForm.hostName}
-                onChange={e => setMappingForm(prev => ({ ...prev, hostName: e.target.value }))}
-              >
-                <option value="">UniFi Host auswählen...</option>
-                {unmatchedHosts.map(host => (
-                  <option key={host.id} value={host.hostName}>{host.hostName}</option>
-                ))}
-              </select>
-              <select
-                style={inputStyle}
-                value={mappingForm.customerId}
-                onChange={e => setMappingForm(prev => ({ ...prev, customerId: e.target.value }))}
-              >
-                <option value="">Kunde auswählen...</option>
-                {customers.map(customer => (
-                  <option key={customer.id} value={String(customer.id)}>{customer.name}</option>
-                ))}
-              </select>
-              <button style={primaryBtn} onClick={handleCreateMapping} disabled={isSavingMapping}>
-                {isSavingMapping ? 'Speichert...' : 'Mapping speichern'}
-              </button>
-            </div>
-
-            {mappingMessage && (
-              <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '10px' }}>{mappingMessage}</div>
-            )}
-
-            {unmatchedHosts.length === 0 && (
-              <div style={{ color: '#64748b', fontSize: '12px', marginBottom: '10px' }}>
-                Keine offenen UniFi Hosts gefunden. Bitte zuerst UniFi-Sync ausführen.
-              </div>
-            )}
-
-            {unifiMappings.length > 0 ? (
-              <table style={{ ...deviceTableStyle, marginBottom: 0 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #334155' }}>
-                    <th style={{ textAlign: 'left', padding: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>Match-Text</th>
-                    <th style={{ textAlign: 'left', padding: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>Kunde</th>
-                    <th style={{ textAlign: 'right', padding: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>Aktion</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {unifiMappings.map(mapping => (
-                    <tr key={mapping.id} style={{ borderBottom: '1px solid #1e293b' }}>
-                      <td style={{ padding: '8px', color: '#e2e8f0', fontFamily: 'monospace', fontSize: '13px' }}>{mapping.matchText}</td>
-                      <td style={{ padding: '8px', color: '#cbd5e1', fontSize: '13px' }}>{mapping.customerName}</td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>
-                        <button style={dangerBtn} onClick={() => handleDeleteMapping(mapping.id)}>Löschen</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div style={{ color: '#64748b', fontSize: '12px' }}>Noch keine manuellen Mappings vorhanden.</div>
-            )}
-          </>
-        )}
-      </div>
 
       {/* Add Customer */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
@@ -543,7 +361,7 @@ export default function CustomersPage() {
                         <td style={{ padding: '8px', color: '#94a3b8', fontSize: '13px' }}>
                           Neues Produkt für {group.name}
                           <div style={{ marginTop: '6px', color: '#64748b', fontSize: '12px' }}>
-                            Vorhanden: {group.entries.some(e => !isUnknownEntry(e)) ? group.entries.map(e => `${e.product} (${e.currentVersion})`).join(', ') : 'keine'}
+                            Vorhanden: {group.entries.some(e => !isUnknownEntry(e)) ? group.entries.map(e => `${e.product ?? 'Nicht erfasst'}${e.currentVersion ? ` (${e.currentVersion})` : ''}`).join(', ') : 'keine'}
                           </div>
                         </td>
                         <td style={{ padding: '8px' }}>
@@ -601,7 +419,7 @@ export default function CustomersPage() {
                         ) : (
                           <>
                             <td style={{ padding: '8px 8px 8px 24px', color: '#64748b', fontSize: '13px' }}>↳ {group.name}</td>
-                            <td style={{ padding: '8px', color: '#94a3b8', fontSize: '14px' }}>{device.product}</td>
+                            <td style={{ padding: '8px', color: device.product ? '#94a3b8' : '#475569', fontSize: '14px', fontStyle: device.product ? 'normal' : 'italic' }}>{device.product ?? 'Nicht erfasst'}</td>
                             <td style={{ padding: '8px', color: '#94a3b8', fontSize: '14px', fontFamily: 'monospace' }}>{device.currentVersion}</td>
                             <td style={{ padding: '8px', textAlign: 'right' }}>
                               <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>

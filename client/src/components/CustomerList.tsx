@@ -72,7 +72,14 @@ export default function CustomerList({
           }}
         >
           <div style={{ fontSize: '13px', fontWeight: 600, color: '#94a3b8', marginBottom: '4px' }}>
-            {customer.name}
+            <a
+              href={`#/customers/${customer.id}`}
+              style={{ color: '#94a3b8', textDecoration: 'none' }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#60a5fa')}
+              onMouseLeave={e => (e.currentTarget.style.color = '#94a3b8')}
+            >
+              {customer.name}
+            </a>
             <span style={{ color: '#fbbf24', fontSize: '12px', marginLeft: '8px', fontWeight: 500 }}>
               ({customer.devices.length} Update{customer.devices.length === 1 ? '' : 's'})
             </span>

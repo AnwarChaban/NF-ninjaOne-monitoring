@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { fetchAllLatestVersions, fetchLatestVersion } from '../services/version-fetcher';
-import { getCustomers } from '../services/ninjaone';
 import { compareVersions } from '../services/comparator';
 import { sendNotifications, type UpdateNotification } from '../services/notifier';
+import { getAllProducts } from '../services/products';
+import { getAllDevicesByProduct } from '../services/customers';
 
 const router = Router();
 
@@ -12,27 +13,27 @@ router.post('/check', async (req, res) => {
 
     console.log(`[Check] Manual check triggered${product ? ` for ${product}` : ' for all products'}`);
 
+    // Fetch versions
     const versions = product
       ? [await fetchLatestVersion(product)]
       : await fetchAllLatestVersions();
 
-    const customers = await getCustomers();
+    // Get all devices grouped by product
+    const devicesByProduct = getAllDevicesByProduct();
 
     const updates: UpdateNotification[] = [];
 
-    for (const version of versions) {
-      if (!version.latestVersion) continue;
+    for (const versionInfo of versions) {
+      if (!versionInfo.latestVersion) continue;
 
-      for (const customer of customers) {
-        for (const device of customer.devices) {
-          if (device.product !== version.product) continue;
-          const comparison = compareVersions(device.currentVersion, version.latestVersion, device.product);
-          updates.push({
-            ...comparison,
-            customer: customer.name,
-            device: device.name,
-          });
-        }
+      const devices = devicesByProduct[versionInfo.product] || [];
+      for (const device of devices) {
+        const comparison = compareVersions(device.currentVersion, versionInfo.latestVersion, versionInfo.product);
+        updates.push({
+          ...comparison,
+          customer: device.customerName,
+          device: `${device.source}-device-${device.id}`,
+        });
       }
     }
 

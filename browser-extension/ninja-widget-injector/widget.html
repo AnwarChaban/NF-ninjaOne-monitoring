@@ -8,9 +8,17 @@
   </head>
   <body>
     <div class="widget-root" id="widget-root">
-      <div class="widget-meta">
-        <span id="api-source" class="meta-pill">Quelle: localhost:3001</span>
-        <span id="last-sync" class="meta-time">warte auf Daten…</span>
+      <div class="widget-top">
+        <div class="widget-meta">
+          <span id="api-source" class="meta-pill">Quelle: localhost:3001</span>
+          <span id="last-sync" class="meta-time">warte auf Daten…</span>
+        </div>
+        <div class="toggle-bar">
+          <button id="toggle-software" class="toggle-btn toggle-active" type="button">Nach Software</button>
+          <button id="toggle-kunde" class="toggle-btn" type="button">Nach Kunde</button>
+          <button id="toggle-sophos" class="toggle-btn" type="button">Sophos Alerts</button>
+          <button id="toggle-backup" class="toggle-btn" type="button">Backup</button>
+        </div>
       </div>
 
       <div id="content" class="content">
