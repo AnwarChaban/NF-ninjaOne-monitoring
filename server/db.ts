@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const DB_PATH = path.join(process.cwd(), 'data', 'versions.db');
+const DB_PATH = path.join(__dirname, '..', 'data', 'versions.db');
 
 let db: Database.Database;
 
@@ -399,9 +399,11 @@ function createIndexes() {
   // Add paused/manual_status columns to backup_checks
   const backupCheckCols = db.prepare('PRAGMA table_info(backup_checks)').all() as Array<{ name: string }>;
   if (backupCheckCols.length > 0) {
+    let migrated = false;
     const addCol = (col: string, def: string) => {
       if (!backupCheckCols.some(c => c.name === col)) {
         db.exec(`ALTER TABLE backup_checks ADD COLUMN ${col} ${def}`);
+        migrated = true;
       }
     };
     addCol('paused', 'INTEGER NOT NULL DEFAULT 0');
@@ -413,6 +415,6 @@ function createIndexes() {
     addCol('manual_status_set_at', 'TEXT');
     addCol('manual_status_set_by', 'INTEGER');
     addCol('manual_status_comment', 'TEXT');
-    console.log('[DB] Migrated backup_checks: paused/manual_status columns ensured');
+    if (migrated) console.log('[DB] Migrated backup_checks: added paused/manual_status columns');
   }
 }

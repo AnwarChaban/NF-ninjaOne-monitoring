@@ -731,6 +731,16 @@ router.post('/admin/sophos/sync-alerts', async (req, res) => {
 
 // --- UniFi Mappings ---
 
+type UnifiCustomerResult = {
+  id: number;
+  customerId: number;
+  unifiCustomerId: string;
+  hostName: string;
+  customerName: string;
+  pendingSync: boolean;
+  devices: Array<{ id: number; name: string; productId: string; currentVersion: string; latestVersion: string; status: string }>;
+};
+
 router.get('/admin/unifi/customers', (_req, res) => {
   const db = getDb();
 
@@ -745,7 +755,7 @@ router.get('/admin/unifi/customers', (_req, res) => {
 
   const syncedCustomerIds = new Set(synced.map(s => s.customerId));
 
-  const result = synced.map(uc => {
+  const result: UnifiCustomerResult[] = synced.map(uc => {
     const devices = db.prepare(`
       SELECT id, name, product_id as productId, current_version as currentVersion
       FROM unifi_devices
@@ -783,11 +793,11 @@ router.get('/admin/unifi/customers', (_req, res) => {
         customerName: p.customerName,
         pendingSync: true,
         devices: [],
-      } as any);
+      });
     }
   }
 
-  result.sort((a, b) => (a as any).customerName.localeCompare((b as any).customerName));
+  result.sort((a, b) => a.customerName.localeCompare(b.customerName));
   res.json(result);
 });
 

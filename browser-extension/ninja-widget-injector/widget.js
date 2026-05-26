@@ -1,7 +1,7 @@
 const API_BASE_CANDIDATES = [
+  "http://localhost:3001/api",
+  "http://127.0.0.1:3001/api",
   "https://10.16.10.58/api",
-   "http://localhost:3001/api",
-  "http://127.0.0.1:3001/api"
 ];
 
 const REFRESH_INTERVAL_MS = 30000;

@@ -183,9 +183,13 @@ router.post('/admin/backup-checks', requireAuth, (req, res) => {
   res.json({ ok: true, id: result.lastInsertRowid });
 });
 
+// Note: backup-check write routes intentionally require only requireAuth (not a specific role).
+// Both administrators and techniker have full backup-check CRUD access per role design.
+
 router.put('/admin/backup-checks/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string, 10);
+  if (isNaN(id)) { res.status(400).json({ error: 'Invalid id' }); return; }
   const { name, backupAccountId, intervalHours, graceHours, subjectFilter, subjectMatchType, bodyFilter, active } =
     req.body as {
       name?: string;
@@ -223,7 +227,8 @@ router.put('/admin/backup-checks/:id', requireAuth, (req, res) => {
 });
 
 router.post('/admin/backup-checks/:id/manual-status', requireAuth, (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string, 10);
+  if (isNaN(id)) { res.status(400).json({ error: 'Invalid id' }); return; }
   const { status, comment } = req.body as {
     status?: 'success' | 'failed' | 'missed' | 'unknown' | null;
     comment?: string | null;
@@ -237,7 +242,8 @@ router.post('/admin/backup-checks/:id/manual-status', requireAuth, (req, res) =>
 });
 
 router.post('/admin/backup-checks/:id/pause', requireAuth, (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string, 10);
+  if (isNaN(id)) { res.status(400).json({ error: 'Invalid id' }); return; }
   const { reason, pausedUntil } = req.body as { reason?: string; pausedUntil?: string | null };
   if (!reason) {
     res.status(400).json({ error: 'reason is required' });
@@ -252,7 +258,8 @@ router.post('/admin/backup-checks/:id/pause', requireAuth, (req, res) => {
 });
 
 router.post('/admin/backup-checks/:id/resume', requireAuth, (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string, 10);
+  if (isNaN(id)) { res.status(400).json({ error: 'Invalid id' }); return; }
   try {
     resumeCheck(id, req.user!);
     res.json({ ok: true });
@@ -262,7 +269,8 @@ router.post('/admin/backup-checks/:id/resume', requireAuth, (req, res) => {
 });
 
 router.delete('/admin/backup-checks/:id', requireAuth, (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string, 10);
+  if (isNaN(id)) { res.status(400).json({ error: 'Invalid id' }); return; }
   const row = getDb().prepare('SELECT name FROM backup_checks WHERE id = ?').get(id) as { name: string } | undefined;
   getDb().prepare('DELETE FROM backup_checks WHERE id = ?').run(id);
   logAction(req.user!, 'backup_check.delete', 'backup_check', id, row?.name ?? String(id), null, req);
@@ -277,7 +285,7 @@ router.get('/admin/backup-accounts/:id/recent-emails', requireAuth, async (req, 
   }
   const account = getDb()
     .prepare('SELECT * FROM backup_accounts WHERE id = ?')
-    .get(parseInt(req.params.id)) as { from_email: string } | undefined;
+    .get(parseInt(req.params.id as string, 10)) as { from_email: string } | undefined;
   if (!account) { res.status(404).json({ error: 'Account nicht gefunden' }); return; }
 
   const hours = Math.min(parseInt(String(req.query.hours ?? '720')) || 720, 720);
