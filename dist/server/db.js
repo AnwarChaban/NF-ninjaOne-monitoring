@@ -1,22 +1,24 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-
-const DB_PATH = path.join(__dirname, '..', '..', 'data', 'versions.db');
-
-let db: Database.Database;
-
-export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-    initDb();
-  }
-  return db;
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getDb = getDb;
+const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
+const path_1 = __importDefault(require("path"));
+const DB_PATH = path_1.default.join(__dirname, '..', '..', 'data', 'versions.db');
+let db;
+function getDb() {
+    if (!db) {
+        db = new better_sqlite3_1.default(DB_PATH);
+        db.pragma('journal_mode = WAL');
+        db.pragma('foreign_keys = ON');
+        initDb();
+    }
+    return db;
 }
-
 function initDb() {
-  db.exec(`
+    db.exec(`
     CREATE TABLE IF NOT EXISTS customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -239,22 +241,19 @@ function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
   `);
-
-  createIndexes();
-  migrateBackupSchema();
-
+    createIndexes();
+    migrateBackupSchema();
 }
-
 function migrateBackupSchema() {
-  // If backup_checks was created with old customer_id column, drop and recreate
-  const cols = db.prepare("PRAGMA table_info(backup_checks)").all() as Array<{ name: string }>;
-  if (cols.length > 0 && cols.some(c => c.name === 'customer_id')) {
-    console.log('[DB] Migrating backup_checks to new schema (backup_account_id)...');
-    db.exec(`
+    // If backup_checks was created with old customer_id column, drop and recreate
+    const cols = db.prepare("PRAGMA table_info(backup_checks)").all();
+    if (cols.length > 0 && cols.some(c => c.name === 'customer_id')) {
+        console.log('[DB] Migrating backup_checks to new schema (backup_account_id)...');
+        db.exec(`
       DROP TABLE IF EXISTS backup_check_results;
       DROP TABLE IF EXISTS backup_checks;
     `);
-    db.exec(`
+        db.exec(`
       CREATE TABLE IF NOT EXISTS backup_accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_id INTEGER NOT NULL UNIQUE,
@@ -291,12 +290,11 @@ function migrateBackupSchema() {
         FOREIGN KEY (check_id) REFERENCES backup_checks(id) ON DELETE CASCADE
       );
     `);
-    console.log('[DB] Backup schema migration complete.');
-  }
+        console.log('[DB] Backup schema migration complete.');
+    }
 }
-
 function createIndexes() {
-  db.exec(`
+    db.exec(`
     CREATE INDEX IF NOT EXISTS idx_product_versions_product ON product_versions(product_id);
     CREATE INDEX IF NOT EXISTS idx_product_versions_checked ON product_versions(checked_at);
     CREATE INDEX IF NOT EXISTS idx_ninjaone_devices_customer ON ninjaone_devices(ninjaone_customer_id);
@@ -306,19 +304,17 @@ function createIndexes() {
     CREATE INDEX IF NOT EXISTS idx_sophos_devices_customer ON sophos_devices(sophos_customer_id);
     CREATE INDEX IF NOT EXISTS idx_sophos_devices_product ON sophos_devices(product_id);
   `);
-
-  db.exec(`
+    db.exec(`
     CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
     CREATE INDEX IF NOT EXISTS idx_sync_history_integration ON sync_history(integration, completed_at DESC);
   `);
-
-  // Add task_type to sync_history if not exists (must run BEFORE creating index on it)
-  const syncHistoryCols = db.prepare('PRAGMA table_info(sync_history)').all() as Array<{ name: string }>;
-  if (syncHistoryCols.length > 0 && !syncHistoryCols.some(c => c.name === 'task_type')) {
-    db.exec(`ALTER TABLE sync_history ADD COLUMN task_type TEXT`);
-    db.exec(`
+    // Add task_type to sync_history if not exists (must run BEFORE creating index on it)
+    const syncHistoryCols = db.prepare('PRAGMA table_info(sync_history)').all();
+    if (syncHistoryCols.length > 0 && !syncHistoryCols.some(c => c.name === 'task_type')) {
+        db.exec(`ALTER TABLE sync_history ADD COLUMN task_type TEXT`);
+        db.exec(`
       UPDATE sync_history SET task_type = CASE integration
         WHEN 'ninjaone' THEN 'ninjaone_devices'
         WHEN 'unifi'    THEN 'unifi_devices'
@@ -328,45 +324,42 @@ function createIndexes() {
       END
       WHERE task_type IS NULL
     `);
-    console.log('[DB] Migrated sync_history: added task_type column');
-  }
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_sync_history_task ON sync_history(task_type, completed_at DESC)`);
-
-  // Add expires_at / expiry_warning_sent to settings if not exists
-  const settingsCols = db.prepare('PRAGMA table_info(settings)').all() as Array<{ name: string }>;
-  if (settingsCols.length > 0) {
-    if (!settingsCols.some(c => c.name === 'expires_at')) {
-      db.exec(`ALTER TABLE settings ADD COLUMN expires_at DATETIME`);
+        console.log('[DB] Migrated sync_history: added task_type column');
     }
-    if (!settingsCols.some(c => c.name === 'expiry_warning_sent')) {
-      db.exec(`ALTER TABLE settings ADD COLUMN expiry_warning_sent INTEGER DEFAULT 0`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sync_history_task ON sync_history(task_type, completed_at DESC)`);
+    // Add expires_at / expiry_warning_sent to settings if not exists
+    const settingsCols = db.prepare('PRAGMA table_info(settings)').all();
+    if (settingsCols.length > 0) {
+        if (!settingsCols.some(c => c.name === 'expires_at')) {
+            db.exec(`ALTER TABLE settings ADD COLUMN expires_at DATETIME`);
+        }
+        if (!settingsCols.some(c => c.name === 'expiry_warning_sent')) {
+            db.exec(`ALTER TABLE settings ADD COLUMN expiry_warning_sent INTEGER DEFAULT 0`);
+        }
     }
-  }
-
-  // Add password_hash / email columns to users if not exists
-  const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
-  if (userCols.length > 0 && !userCols.some(c => c.name === 'password_hash')) {
-    db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT`);
-    console.log('[DB] Migrated users: added password_hash column');
-  }
-  if (userCols.length > 0 && !userCols.some(c => c.name === 'email')) {
-    db.exec(`ALTER TABLE users ADD COLUMN email TEXT`);
-    console.log('[DB] Migrated users: added email column');
-  }
-  if (userCols.length > 0 && !userCols.some(c => c.name === 'ninja_uid')) {
-    db.exec(`ALTER TABLE users ADD COLUMN ninja_uid TEXT`);
-    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ninja_uid ON users(ninja_uid) WHERE ninja_uid IS NOT NULL`);
-    console.log('[DB] Migrated users: added ninja_uid column');
-  }
-
-  // Make ninjaone_devices.product_id nullable for existing DBs
-  const ninjaDeviceCols = db.prepare('PRAGMA table_info(ninjaone_devices)').all() as Array<{ name: string; notnull: number }>;
-  const productIdCol = ninjaDeviceCols.find(c => c.name === 'product_id');
-  if (productIdCol && productIdCol.notnull === 1) {
-    console.log('[DB] Migrating ninjaone_devices: making product_id nullable...');
-    db.pragma('foreign_keys = OFF');
-    const rebuildTable = db.transaction(() => {
-      db.exec(`
+    // Add password_hash / email columns to users if not exists
+    const userCols = db.prepare('PRAGMA table_info(users)').all();
+    if (userCols.length > 0 && !userCols.some(c => c.name === 'password_hash')) {
+        db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT`);
+        console.log('[DB] Migrated users: added password_hash column');
+    }
+    if (userCols.length > 0 && !userCols.some(c => c.name === 'email')) {
+        db.exec(`ALTER TABLE users ADD COLUMN email TEXT`);
+        console.log('[DB] Migrated users: added email column');
+    }
+    if (userCols.length > 0 && !userCols.some(c => c.name === 'ninja_uid')) {
+        db.exec(`ALTER TABLE users ADD COLUMN ninja_uid TEXT`);
+        db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ninja_uid ON users(ninja_uid) WHERE ninja_uid IS NOT NULL`);
+        console.log('[DB] Migrated users: added ninja_uid column');
+    }
+    // Make ninjaone_devices.product_id nullable for existing DBs
+    const ninjaDeviceCols = db.prepare('PRAGMA table_info(ninjaone_devices)').all();
+    const productIdCol = ninjaDeviceCols.find(c => c.name === 'product_id');
+    if (productIdCol && productIdCol.notnull === 1) {
+        console.log('[DB] Migrating ninjaone_devices: making product_id nullable...');
+        db.pragma('foreign_keys = OFF');
+        const rebuildTable = db.transaction(() => {
+            db.exec(`
         CREATE TABLE ninjaone_devices_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           ninjaone_customer_id INTEGER NOT NULL,
@@ -383,38 +376,37 @@ function createIndexes() {
         DROP TABLE ninjaone_devices;
         ALTER TABLE ninjaone_devices_new RENAME TO ninjaone_devices;
       `);
-    });
-    rebuildTable();
-    db.pragma('foreign_keys = ON');
-    console.log('[DB] Migrated ninjaone_devices: product_id is now nullable');
-  }
-
-  // Add hostname column to sophos_devices if it doesn't exist yet
-  const sophosDeviceCols = db.prepare('PRAGMA table_info(sophos_devices)').all() as Array<{ name: string }>;
-  if (sophosDeviceCols.length > 0 && !sophosDeviceCols.some(c => c.name === 'hostname')) {
-    db.exec(`ALTER TABLE sophos_devices ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`);
-    console.log('[DB] Migrated sophos_devices: added hostname column');
-  }
-
-  // Add paused/manual_status columns to backup_checks
-  const backupCheckCols = db.prepare('PRAGMA table_info(backup_checks)').all() as Array<{ name: string }>;
-  if (backupCheckCols.length > 0) {
-    let migrated = false;
-    const addCol = (col: string, def: string) => {
-      if (!backupCheckCols.some(c => c.name === col)) {
-        db.exec(`ALTER TABLE backup_checks ADD COLUMN ${col} ${def}`);
-        migrated = true;
-      }
-    };
-    addCol('paused', 'INTEGER NOT NULL DEFAULT 0');
-    addCol('paused_at', 'TEXT');
-    addCol('paused_by', 'INTEGER');
-    addCol('paused_reason', 'TEXT');
-    addCol('paused_until', 'TEXT');
-    addCol('manual_status', 'TEXT');
-    addCol('manual_status_set_at', 'TEXT');
-    addCol('manual_status_set_by', 'INTEGER');
-    addCol('manual_status_comment', 'TEXT');
-    if (migrated) console.log('[DB] Migrated backup_checks: added paused/manual_status columns');
-  }
+        });
+        rebuildTable();
+        db.pragma('foreign_keys = ON');
+        console.log('[DB] Migrated ninjaone_devices: product_id is now nullable');
+    }
+    // Add hostname column to sophos_devices if it doesn't exist yet
+    const sophosDeviceCols = db.prepare('PRAGMA table_info(sophos_devices)').all();
+    if (sophosDeviceCols.length > 0 && !sophosDeviceCols.some(c => c.name === 'hostname')) {
+        db.exec(`ALTER TABLE sophos_devices ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`);
+        console.log('[DB] Migrated sophos_devices: added hostname column');
+    }
+    // Add paused/manual_status columns to backup_checks
+    const backupCheckCols = db.prepare('PRAGMA table_info(backup_checks)').all();
+    if (backupCheckCols.length > 0) {
+        let migrated = false;
+        const addCol = (col, def) => {
+            if (!backupCheckCols.some(c => c.name === col)) {
+                db.exec(`ALTER TABLE backup_checks ADD COLUMN ${col} ${def}`);
+                migrated = true;
+            }
+        };
+        addCol('paused', 'INTEGER NOT NULL DEFAULT 0');
+        addCol('paused_at', 'TEXT');
+        addCol('paused_by', 'INTEGER');
+        addCol('paused_reason', 'TEXT');
+        addCol('paused_until', 'TEXT');
+        addCol('manual_status', 'TEXT');
+        addCol('manual_status_set_at', 'TEXT');
+        addCol('manual_status_set_by', 'INTEGER');
+        addCol('manual_status_comment', 'TEXT');
+        if (migrated)
+            console.log('[DB] Migrated backup_checks: added paused/manual_status columns');
+    }
 }

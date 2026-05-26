@@ -75,7 +75,7 @@ router.post('/auth/login', (req, res) => {
 
   const ua = Array.isArray(req.headers['user-agent']) ? req.headers['user-agent'][0] : req.headers['user-agent'];
   const token = createSession(user.id, req.ip, ua, SESSION_DURATION_MS_APP);
-  logAction({ id: user.id, username: user.username, displayName: user.displayName, role: user.role }, 'user.login', 'user', user.id, user.displayName, { method: 'password' }, req);
+  logAction({ id: user.id, username: user.username, displayName: user.displayName, role: user.role as 'administrator' | 'techniker' }, 'user.login', 'user', user.id, user.displayName, { method: 'password' }, req);
   res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } });
 });
 
@@ -98,7 +98,7 @@ router.post('/auth/ninja-login', (req, res) => {
 
   const ua = Array.isArray(req.headers['user-agent']) ? req.headers['user-agent'][0] : req.headers['user-agent'];
   const token = createSession(user.id, req.ip, ua);
-  logAction({ id: user.id, username: user.username, displayName: user.displayName, role: user.role }, 'user.login', 'user', user.id, user.displayName, { method: 'ninja_sso' }, req);
+  logAction({ id: user.id, username: user.username, displayName: user.displayName, role: user.role as 'administrator' | 'techniker' }, 'user.login', 'user', user.id, user.displayName, { method: 'ninja_sso' }, req);
   res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } });
 });
 
