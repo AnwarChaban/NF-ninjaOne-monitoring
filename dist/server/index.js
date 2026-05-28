@@ -43,7 +43,7 @@ app.use('/api', backup_1.default);
 app.use('/api', customers_1.default);
 app.use('/api', admin_1.default);
 // Serve React frontend in production
-const clientDist = path_1.default.join(__dirname, '..', 'client', 'dist');
+const clientDist = path_1.default.join(__dirname, '..', '..', 'client', 'dist');
 app.use(express_1.default.static(clientDist));
 app.get('*', (_req, res) => {
     res.sendFile(path_1.default.join(clientDist, 'index.html'));

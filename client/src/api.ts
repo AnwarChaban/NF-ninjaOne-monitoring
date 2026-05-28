@@ -36,7 +36,13 @@ export function apiFetch(url: string, options: RequestInit = {}): Promise<Respon
   const token = getAuthToken();
   const headers: Record<string, string> = { ...(options.headers as Record<string, string> ?? {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  return fetch(url, { ...options, headers });
+  return fetch(url, { ...options, headers }).then(res => {
+    if (res.status === 401) {
+      clearAuthSession();
+      window.location.reload();
+    }
+    return res;
+  });
 }
 
 async function throwApiError(res: Response, fallbackMessage: string): Promise<never> {
@@ -562,6 +568,15 @@ export async function createBackupAccount(customerId: number, data: { fromEmail:
 export async function deleteBackupAccount(customerId: number): Promise<void> {
   const res = await apiFetch(`${BASE}/admin/customers/${customerId}/backup`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete backup account');
+}
+
+export async function updateBackupAccount(customerId: number, fromEmail: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/admin/customers/${customerId}/backup`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fromEmail }),
+  });
+  if (!res.ok) return throwApiError(res, 'Failed to update backup account');
 }
 
 export async function fetchBackupChecks(): Promise<BackupCheckDef[]> {

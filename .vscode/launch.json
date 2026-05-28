@@ -35,6 +35,19 @@
         "/@fs/*": "${workspaceFolder}/*",
         "/src/*": "${workspaceFolder}/client/src/*"
       }
+    },
+    {
+      "name": "Remote Backend (10.16.10.58)",
+      "type": "node",
+      "request": "attach",
+      "address": "10.16.10.58",
+      "port": 9229,
+      "localRoot": "${workspaceFolder}",
+      "remoteRoot": "/opt/NF-ninjaOne-monitoring",
+      "sourceMaps": true,
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "outFiles": ["${workspaceFolder}/dist/server/**/*.js"],
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"]
     }
   ],
   "compounds": [

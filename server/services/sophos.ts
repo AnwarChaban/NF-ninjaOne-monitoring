@@ -227,6 +227,10 @@ async function _syncSophosDataInternal(): Promise<{ tenants: number; devices: nu
     .prepare('SELECT id, name FROM customers')
     .all() as Array<{ id: number; name: string }>;
 
+  // Ensure the sophos-firewall product exists (FK required by sophos_devices)
+  db.prepare(`INSERT OR IGNORE INTO products (id, name, type, active, created_at) VALUES ('sophos-firewall', 'Sophos Firewall', 'scraped', 1, ?)`)
+    .run(now);
+
   let syncedTenants = 0;
   let syncedDevices = 0;
   let unmatchedCount = 0;

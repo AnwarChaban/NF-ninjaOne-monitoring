@@ -71,6 +71,7 @@ export default function AuditLogs() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<LogMeta>({ users: [], actions: [], entityTypes: [] });
   const [page, setPage] = useState(1);
 
@@ -82,6 +83,7 @@ export default function AuditLogs() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
       if (filterDateFrom) params.set('dateFrom', filterDateFrom);
@@ -95,7 +97,12 @@ export default function AuditLogs() {
         const data = await res.json() as LogsResponse;
         setLogs(data.logs);
         setTotal(data.total);
+      } else {
+        const text = await res.text().catch(() => '');
+        setError(`Fehler ${res.status}: ${text || res.statusText}`);
       }
+    } catch (e) {
+      setError((e as Error).message || 'Netzwerkfehler');
     } finally {
       setLoading(false);
     }
@@ -183,6 +190,12 @@ export default function AuditLogs() {
           </button>
         )}
       </div>
+
+      {error && (
+        <div style={{ backgroundColor: '#450a0a', border: '1px solid #7f1d1d', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', color: '#fca5a5', fontSize: '13px' }}>
+          {error}
+        </div>
+      )}
 
       <div style={{ color: '#64748b', fontSize: '12px', marginBottom: '12px' }}>
         {total} Einträge gesamt
