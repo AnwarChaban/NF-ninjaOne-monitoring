@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
   fetchCustomers, fetchBackupChecks, createBackupCheck, updateBackupCheck, deleteBackupCheck,
-  fetchBackupAccounts, createBackupAccount, deleteBackupAccount, triggerBackupSync,
-  pauseBackupCheck, resumeBackupCheck,
+  fetchBackupAccounts, createBackupAccount, deleteBackupAccount, updateBackupAccount, triggerBackupSync,
+  pauseBackupCheck, resumeBackupCheck, apiFetch,
   type Customer, type BackupCheckDef, type BackupAccount,
 } from '../../api';
 
@@ -28,7 +28,7 @@ async function fetchRecentEmails(accountId: string, hours = 720): Promise<{
   jobs: JobSuggestion[];
   suggestedInterval: number;
 }> {
-  const res = await fetch(`${BASE}/admin/backup-accounts/${accountId}/recent-emails?hours=${hours}`);
+  const res = await apiFetch(`${BASE}/admin/backup-accounts/${accountId}/recent-emails?hours=${hours}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -55,6 +55,13 @@ const emptyForm = {
   bodyFilter: '',
 };
 type FormState = typeof emptyForm;
+
+function cleanJobName(subject: string): string {
+  return subject
+    .replace(/^.*?\[(Success|Failed)\]\s*/i, '')  // alles bis inkl. [Success]/[Failed] entfernen
+    .replace(/\s*\(.*$/, '')                       // alles ab ( entfernen
+    .trim();
+}
 
 function formatRelative(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -133,11 +140,12 @@ function BulkImportPanel({
     setImporting(true);
     setError('');
     let created = 0;
+    const errors: string[] = [];
     for (const job of toImport) {
       try {
         await createBackupCheck({
           backupAccountId: parseInt(accountId),
-          name: job.subject,
+          name: cleanJobName(job.subject),
           intervalHours: job.suggestedInterval,
           graceHours: 1,
           subjectFilter: job.subject,
@@ -145,13 +153,16 @@ function BulkImportPanel({
           bodyFilter: null,
         });
         created++;
-      } catch {
-        // skip duplicates or errors silently
+      } catch (e) {
+        errors.push(`„${job.subject}": ${(e as Error).message}`);
       }
     }
     setImporting(false);
+    if (errors.length > 0) {
+      setError(`${errors.length} Fehler:\n${errors.join('\n')}`);
+    }
     setResult(`${created} Job${created !== 1 ? 's' : ''} erfolgreich importiert.`);
-    onDone();
+    if (created > 0) onDone();
   }
 
   return (
@@ -242,12 +253,10 @@ function BulkImportPanel({
                         />
                       </td>
                       <td style={{ padding: '10px 12px' }}>
-                        <div style={{ color: '#e2e8f0', fontSize: '13px', fontWeight: 500 }}>{job.subject}</div>
-                        {job.bodyPreview && (
-                          <div style={{ color: '#475569', fontSize: '11px', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '400px' }}>
-                            {job.bodyPreview}
-                          </div>
-                        )}
+                        <div style={{ color: '#e2e8f0', fontSize: '13px', fontWeight: 500 }}>{cleanJobName(job.subject)}</div>
+                        <div style={{ color: '#475569', fontSize: '11px', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '400px' }}>
+                          {job.subject}
+                        </div>
                       </td>
                       <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: '13px', whiteSpace: 'nowrap' }}>
                         {job.suggestedInterval} Std.
@@ -289,8 +298,11 @@ function BulkImportPanel({
         </>
       )}
 
-      {!loading && jobs.length === 0 && accountId && (
-        <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+      {!loading && jobs.length === 0 && accountId && !error && (
+        <div style={{ marginTop: '4px' }}>
+          <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '10px' }}>
+            Keine E-Mails im gewählten Zeitraum gefunden. Versuche einen längeren Zeitraum (z.B. 30 Tage).
+          </p>
           <button style={ghostBtn} onClick={onCancel}>Abbrechen</button>
         </div>
       )}
@@ -464,6 +476,8 @@ export default function BackupChecksPage() {
   const [accounts, setAccounts] = useState<BackupAccount[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [emailForms, setEmailForms] = useState<Record<number, string>>({});
+  const [editingEmail, setEditingEmail] = useState<number | null>(null);
+  const [editEmailValue, setEditEmailValue] = useState('');
   const [activePanel, setActivePanel] = useState<ActivePanel>('none');
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -490,6 +504,18 @@ export default function BackupChecksPage() {
     if (!confirm('Backup-Account löschen? Alle zugehörigen Checks werden ebenfalls gelöscht.')) return;
     await deleteBackupAccount(customerId);
     load();
+  }
+
+  async function handleUpdateEmail(customerId: number) {
+    const email = editEmailValue.trim();
+    if (!email) return;
+    try {
+      await updateBackupAccount(customerId, email);
+      setEditingEmail(null);
+      load();
+    } catch (err) {
+      alert((err as Error).message);
+    }
   }
 
   useEffect(() => { load(); }, []);
@@ -656,11 +682,34 @@ export default function BackupChecksPage() {
                 <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '15px' }}>{group.customerName}</span>
                 {group.backupAccount ? (
                   <>
-                    <span style={{ color: '#475569', fontSize: '12px', fontFamily: 'monospace' }}>{group.backupAccount.fromEmail}</span>
-                    <button
-                      style={{ ...dangerBtn, padding: '2px 8px', fontSize: '11px' }}
-                      onClick={() => handleDeleteBackupAccount(group.customerId)}
-                    >✕ E-Mail entfernen</button>
+                    {editingEmail === group.customerId ? (
+                      <>
+                        <input
+                          style={{ ...inputStyle, width: '260px', fontSize: '12px', padding: '4px 8px' }}
+                          value={editEmailValue}
+                          onChange={e => setEditEmailValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleUpdateEmail(group.customerId);
+                            if (e.key === 'Escape') setEditingEmail(null);
+                          }}
+                          autoFocus
+                        />
+                        <button style={{ ...primaryBtn, padding: '2px 8px', fontSize: '11px' }} onClick={() => handleUpdateEmail(group.customerId)}>Speichern</button>
+                        <button style={{ ...ghostBtn, padding: '2px 8px', fontSize: '11px' }} onClick={() => setEditingEmail(null)}>Abbrechen</button>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ color: '#475569', fontSize: '12px', fontFamily: 'monospace' }}>{group.backupAccount.fromEmail}</span>
+                        <button
+                          style={{ ...ghostBtn, padding: '2px 8px', fontSize: '11px' }}
+                          onClick={() => { setEditingEmail(group.customerId); setEditEmailValue(group.backupAccount!.fromEmail); }}
+                        >✎ Bearbeiten</button>
+                        <button
+                          style={{ ...dangerBtn, padding: '2px 8px', fontSize: '11px' }}
+                          onClick={() => handleDeleteBackupAccount(group.customerId)}
+                        >✕ Entfernen</button>
+                      </>
+                    )}
                   </>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

@@ -132,6 +132,33 @@ router.get('/admin/backup-accounts', requireAuth, (_req, res) => {
   res.json(getAllBackupAccounts());
 });
 
+router.patch('/admin/customers/:id/backup', requireAuth, (req, res) => {
+  const db = getDb();
+  const customerId = parseInt(req.params.id as string, 10);
+  const { fromEmail } = req.body as { fromEmail?: string };
+
+  if (!fromEmail?.trim()) {
+    res.status(400).json({ error: 'fromEmail ist erforderlich' });
+    return;
+  }
+
+  const account = db.prepare('SELECT id, name FROM backup_accounts WHERE customer_id = ?').get(customerId) as { id: number; name: string } | undefined;
+  if (!account) {
+    res.status(404).json({ error: 'Backup-Account nicht gefunden' });
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    db.prepare('UPDATE backup_accounts SET from_email = ?, updated_at = ? WHERE customer_id = ?')
+      .run(fromEmail.trim(), now, customerId);
+    logAction(req.user!, 'backup_account.update', 'backup_account', customerId, account.name, { fromEmail }, req);
+    res.json({ ok: true });
+  } catch {
+    res.status(409).json({ error: 'Diese E-Mail-Adresse wird bereits verwendet' });
+  }
+});
+
 // --- Admin: Backup Checks ---
 
 router.get('/admin/backup-checks', requireAuth, (_req, res) => {
